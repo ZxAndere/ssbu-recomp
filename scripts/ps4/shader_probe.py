@@ -93,6 +93,7 @@ def main():
     compiler=stage/'psbc_compile.c'; original=(root/'libpsbc/psbc_compile.c').read_text()
     corrected=original.replace('compiler_info.ac = &ac_info;',
         'compiler_info.ac = &ac_info;\n    compiler_info.spirv_caps.Shader = true;\n'
+        '    compiler_info.spirv_caps.DemoteToHelperInvocation = true;\n'
         '    compiler_info.subgroup_size = (gfxlevel >= GFX10) ? 32 : 64;\n'
         '    compiler_info.min_subgroup_size = (gfxlevel >= GFX10) ? 32 : 64;\n'
         '    compiler_info.max_subgroup_size = 64;')

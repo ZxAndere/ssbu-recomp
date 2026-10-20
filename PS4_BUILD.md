@@ -111,3 +111,48 @@ Cross solicita un tono; Options libera dispositivos y deja el proceso en espera.
 CRT, ABI, pantalla, sonido, mandos y cierre no se han verificado en hardware. La UI indica que
 Smash no está ejecutándose. El siguiente trabajo con datos propios se hará primero en PC;
 no se solicita probar cada commit. No hay FPS ni compatibilidad 13.52/GoldHEN confirmados.
+
+## Reanudación gráfica incremental
+
+El estado actual está en PS4_PROGRESS.md. No repetir extracción ni lift del main. La ampliación del SDK
+usa `sdk-nvn-state2/generated` y conserva `sdk-core7`, `sdk-core8` y sus objetos anteriores.
+
+```powershell
+python scripts/ps4/boot_probe.py --executable build_ps4/host-private-full/diagnostic.exe --image build_ps4/game-exefs2/main.elf --out build_ps4/boot-current.json --checkpoints 30000000
+```
+
+Para relink rápido del runtime Windows actual, usar clang con
+`@build_ps4/host-sdk-nvn-state2/relink.rsp`; reutiliza los objetos originales del main y los nuevos SDK.
+Para regenerar solamente el SDK desde su tabla NVN local:
+
+```powershell
+python scripts/ps4/nvn_state_roots.py --image build_ps4/game-exefs2/sdk.elf --out build_ps4/new-sdk-roots.json
+python scripts/ps4/bootstrap_lift.py --image build_ps4/game-exefs2/sdk.elf --out build_ps4/new-sdk-closure --base 0x7200000000 --roots-file build_ps4/new-sdk-roots.json --cut-imports build_ps4/game-full/generated/imports.c
+```
+
+`relink_sdk.py --generated ... --image ... --response ... --out ... --target host|ps4 --llvm-bin ...`
+reemplaza solo los objetos SDK de un response file existente, sin borrar los anteriores ni recompilar
+el main. Para PS4 añadir `--sdk ...`. Los outputs deben permanecer en build_ps4/.
+
+Los flags de gráficos se añaden solo al runtime: `--host-vulkan-headers` para Windows y
+`--ps4-gnm-root/--ps4-gnm-library` para una biblioteca OpenGNM propia compilada con Orbis.
+No usar el backend de Windows como evidencia de compatibilidad de GPU PS4.
+
+No cambiar inadvertidamente `--private-game-package` al reutilizar la caché PS4 completa:
+`SP_GAME_APP0` forma parte de sus firmas. Los relinks incrementales conservan los flags existentes.
+
+## Shaders reales y caché privada
+
+Para continuar automáticamente las capturas de shaders del arranque en Windows:
+
+```powershell
+python scripts/ps4/advance_shader_boot.py --executable build_ps4/host-private-full/diagnostic.exe --image build_ps4/game-exefs2/main.elf --captures build_ps4/game-shader-capture --romfs D:/SmashUltimatePS4-local/romfs-13.0.5 --llvm-bin <LLVM-bin> --glslang <glslang.exe> --cycles 16
+```
+
+SSBU_SHADER_CAPTURE y SSBU_SHADER_CACHE se limitan al proceso hijo. Las capturas existentes se reutilizan
+solo cuando son idénticas. La conversión conserva cachés por fuente y toolchain; cualquier nuevo error
+ajeno a shaders detiene el ciclo. Los archivos derivados no salen de build_ps4/.
+
+`real_gcn_probe.py --translated build_ps4/game-shader-capture/translated --stack <OpenGNM-stack> --llvm-bin <LLVM-bin>`
+comprueba offline los contenedores GFX7 del juego. Usa el compilador ya construido por shader_probe.py y
+shader_host_probe.py. Rechaza warnings; no verifica ejecución GPU, recursos ni semántica de los shaders.

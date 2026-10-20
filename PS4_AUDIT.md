@@ -102,3 +102,15 @@ dependen de reservar las bases originales en consola. Falta comprobar los escape
 handlers reales con el ExeFS propio y conectar el SDK, excepciones y renderer 3D.
 La compatibilidad con firmware 13.52/GoldHEN es
 información aportada por el usuario, no una combinación comprobada por este proyecto.
+
+## Revisión gráfica actual
+
+La continuación actual se detalla en [PS4_PROGRESS.md](PS4_PROGRESS.md). En PC se crearon 15 módulos Vulkan
+a partir de shaders Maxwell reales del respaldo local. Esos shaders también producen contenedores GFX7
+con NIR/ACO, sin warnings, pero aún no se ejecutaron en GCN. Se verificaron pools/buffers, sampler, fences,
+grabación de estados y una transferencia real de GPU con datos propios. No hay imagen ni gameplay de Smash.
+
+La vía OpenGNM directa está enlazada en el ejecutable completo Orbis, con un EOP que debe observarse en
+hardware antes de considerar validado su submit. vulkan-ps4 no se usa como un reemplazo de Vulkan 1.3:
+la revisión local expone 1.0 y contiene rutas sin implementar y sincronización pendiente de jubilación GPU.
+La ausencia de capa Khronos de validación en el PC también se mantiene registrada como pendiente.

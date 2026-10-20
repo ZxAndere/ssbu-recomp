@@ -1,41 +1,42 @@
-# Prueba preparada para PS4 Fat / 13.52 GoldHEN
+# Prueba física preparada — no ejecutada
 
-La compilación privada de `build_ps4/ps4-private-full/` intenta arrancar el código real del juego.
-No se requiere una prueba de consola para implementar el import de foco que sigue pendiente en PC.
-Esta prueba concentra las incertidumbres de hardware cuando se decida validar la compilación.
+El trabajo de software sigue en PC. No se requiere ahora una prueba intermedia en consola.
+Los PKG privados anteriores permanecen locales; su contenido no equivale a un juego jugable.
 
-El paquete privado incluye sus main/sdk en `/app0/` y el main nativo completo. Es local y no se publica.
-Usa el mismo Title ID SSBD00001 que el bootstrap público. El log se anexa a
-`/data/ssbu-ps4-diagnostic.log`; los resultados anteriores permanecen en el archivo.
+## Nueva ruta gráfica experimental
 
-## Resultado esperado de esta revisión
+El ELF local `build_ps4/graphics-probe/game-gnm.elf` enlaza las 112.876 funciones del main y 198 funciones
+SDK con la nueva ruta OpenGNM. Reutiliza los 1.162 objetos del main. El log del ejecutable conserva la
+ruta `/data/ssbu-ps4-diagnostic.log` por continuidad, aunque intenta ejecutar el código real del juego.
 
-1. Completan las pruebas propias: 52 plataforma, 49 servicios, 47 medios, 21 fibras y 307 runtime.
-2. Se mapean main y sdk; el log identifica 67 funciones SDK enlazadas.
-3. Aparecen `GAME PHASE: nninitStartup` y `static constructors (306)`.
-4. Cada constructor termina con `GAME CONSTRUCTOR DONE`; después aparece `GAME PHASE: nnMain`.
-5. Se inicializa el ciclo de vida propio y se registran los hints de rendimiento, sin cambiar frecuencias.
-6. Parada controlada esperada: SetFocusHandlingMode, modo 2, LR 0x7103741fb0.
-7. La UI de pruebas aparece; se comprueban mando, tono con Cross, flips y cierre con Options/menú PS.
+Antes de continuar la inicialización gráfica, la ruta OpenGNM debe comprobar:
 
-Esto no verifica gráficos, audio ni partidas de Smash. Solo contrasta el arranque nativo y los backends.
+1. Asignación y mapa de memoria directa para comandos con acceso GPU.
+2. Emisión de estado inicial y un draw de cero vértices, que no produce una imagen.
+3. Envío de `CACHE_FLUSH_AND_INV_TS_EVENT` con escritura EOP de un nonce de 64 bits.
+4. Observación CPU del mismo nonce antes de dos segundos.
 
-## Cómo identificar una diferencia de hardware
+Solo la línea `GAME GRAPHICS: native GNM startup EOP completed` verifica esa secuencia concreta.
+Un retorno del submit por sí solo no confirma finalización GPU. En timeout se conserva la memoria
+que pueda seguir en vuelo. Esta prueba no comprueba shaders, texturas, presentación ni gráficos de Smash.
 
-| Última evidencia | Incertidumbre que resuelve |
+La ruta GNM todavía no expone todos los límites ni implementa samplers/pipelines del juego. Si el EOP
+funciona, una parada posterior en una consulta NVN pendiente es un bloqueo de software conocido;
+no debe interpretarse como un error de instalación ni ocultarse devolviendo capacidades inventadas.
+
+## Otras incertidumbres físicas
+
+| Última evidencia | Qué comprobaría una prueba física |
 |---|---|
-| No aparece el primer log | Carga CRT/FSELF, librerías importadas o instalación/carga del paquete |
-| Fallan fibras antes del juego | ABI SysV, protección de pila o restauración de registros/FP |
-| Constructor 65: native virtual reservation failed, tamaño 0xf80000000 | Si Orbis admite la reserva PROT_NONE de 62 GiB usada por el juego |
-| Fallo de commit/permisos | Semántica mmap/mprotect sobre páginas Orbis de 16 KiB |
-| Menos constructores que en PC | Comparar la dirección y el primer GUEST STOP con el informe PC; conservar el log completo |
-| Llega a nnMain y al mismo import pendiente | Equivalencia de este punto de arranque; no implica que el runtime completo funcione |
-| Arranque equivalente y fallo de un dispositivo | Resultado y código de Pad/UserService, AudioOut o VideoOut registrado por separado |
+| Ningún primer log | Instalación, CRT/FSELF e imports Orbis |
+| Fallo en fibras | ABI SysV, pila protegida y restauración de registros/FP |
+| Fallo al reservar 62 GiB | Disponibilidad del espacio virtual PROT_NONE requerido por el juego |
+| Fallo de permisos/commit | mmap/mprotect sobre páginas Orbis de 16 KiB |
+| Menos de 306 constructores | Dirección y primer GUEST STOP frente al log PC |
+| Submit GNM rechazado | Código real de GnmDriver y estado de servicios bajo el firmware del usuario |
+| Timeout EOP | Orden de paquetes, memoria/cachés, inicialización del contexto o estado de cola GPU |
+| EOP correcto | Cola nativa y coherencia de esa escritura, todavía sin prueba de renderer |
+| Fallo de foco/mandos/audio/vídeo | ABI o servicio específico, registrado por separado |
 
-El PC ya ejecutó reservas grandes y permisos con un modelo de páginas de 16 KiB. No valida la implementación
-kernel de PS4 ni la disponibilidad física de servicios bajo esa versión de GoldHEN.
-
-Para la siguiente adaptación de foco, OpenOrbis 0.5.4 solo declara GetStatus sin firma de parámetros.
-La [interfaz de shadPS4](https://github.com/shadps4-emu/shadPS4/blob/main/src/core/libraries/system/systemservice.h)
-aporta campos observados, pero no es una prueba física. Antes de basar suspensión/notificaciones del juego
-en ella, hay que contrastar ABI, tamaño y transiciones Home/volver; no se han inventado estados de foco.
+Los adaptadores de foco, Pad, AudioOut y VideoOut siguen compilados. Su presencia no verifica HID,
+audio o presentación de escenas del juego. No hay mediciones de FPS ni compatibilidad GoldHEN confirmada.

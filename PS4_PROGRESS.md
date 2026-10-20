@@ -1,92 +1,117 @@
-# Progreso PS4 — entrada real en nnMain
+# Progreso PS4 — inicialización NVN y compilador GCN
 
-Continuación de `ac2ee45`, rama `ps4/platform-diagnostic`, conservando los objetos compilados y los avances anteriores.
-**En PC se completaron los 306 constructores y se entró en nnMain. Smash no se ha ejecutado en una PS4 física.**
+Continuación de `ac2ee45` en `ps4/platform-diagnostic`. Se conservan las 112.876 funciones del main,
+los 306 constructores y los objetos anteriores. **Todavía no hay una imagen real de Smash, menú ni partida.**
 
-## Arranque real comprobado
+## Arranque medido en PC
 
-| Etapa | Resultado observado en PC |
+| Etapa | Evidencia |
 |---|---|
-| ExeFS propio | main/sdk extraídos localmente; los seis hashes de segmentos NSO son correctos |
-| Main recompilado | 112.876 funciones reales, 1.162 fuentes C, ejecutable Windows completo enlazado |
-| SDK adicional | 67 funciones reales: allocator, mutex/recursive_mutex, std::string y __next_prime |
-| Enlazado guest | Imágenes separadas main/sdk, datos y RTTI reales, relocaciones sin entradas pendientes |
-| nninitStartup | Ejecutado y retornado |
-| Constructores | 306 entrados y 306 retornados, registrados individualmente después de cada llamada |
-| nnMain | Entrado; inicializado el recurso nativo de ciclo de vida de aplicación |
-| Parada actual | nn::oe::SetFocusHandlingMode, LR 0x7103741fb0, modo solicitado 2 |
+| Main nativo | 112.876 funciones; 1.162 objetos reutilizados, cero recompilaciones del main |
+| SDK | 198 funciones locales: las 79 de arranque más 119 funciones de estado NVN y SamplerBuilder |
+| Arranque | nninitStartup retorna; completan los 306 constructores; se entra en nnMain |
+| Servicios | Foco/notificaciones nativos, idioma es-419 del PC, workers cooperativos, mutex y eventos |
+| RomFS | Se monta el directorio del respaldo propio; todavía cero aperturas/lecturas de recursos del juego |
+| Gráficos PC | Se crea un dispositivo Vulkan real en una NVIDIA GeForce GTX 960, API 1.4 |
+| NVN | Se enlazan nombres, se consultan límites del backend y políticas explícitas del traductor |
+| Memoria gráfica | Pools nativos para Shader, Descriptors, Uncached y comandos; flush/invalidate con límites |
+| Descriptores | Tablas de 8.192 texturas y 2.048 samplers; un sampler Vulkan real registrado en el índice 32 |
+| Colas/sync | Dos colas lógicas sobre la cola Vulkan real; fences nativos y almacenamiento del recorder |
+| Parada actual | `nvnTextureBuilderSetDefaults`, LR `0x71037e0cd4` |
 
-La secuencia comprobada avanzó de 62 a 65, 105, 168, 245, 292 y finalmente 306 constructores completados.
-El informe reproducible está en [private-boot-summary.json](docs/ps4/private-boot-summary.json).
-Los logs completos, imágenes, fuentes generadas y ejecutables permanecen exclusivamente en build_ps4/.
-Cero relocaciones pendientes **no significa que todos los imports tengan implementación**: los imports fuertes
-sin puente reciben thunks que detienen la ejecución cuando se usan. Los símbolos débiles sin definición
-real en un módulo quedan a cero, incluidos los hooks opcionales de nu y glslc.
+La preparación privada de RomFS finalizó: 15 archivos, 17.600.938.296 bytes, con manifiesto SHA-256
+por archivo. `data.arc` ocupa 17.600.880.952 bytes. Esto comprueba extracción e integridad local;
+**no comprueba que nnMain ya cargue recursos**. Los respaldos originales no se modifican.
 
-## Cambios técnicos de esta continuación
+El presupuesto ampliable de 30.000.000 checkpoints permite superar la inicialización larga que agotaba
+el millón original. El contador mide checkpoints, no instrucciones ni rendimiento. Todos los imports,
+comandos y capacidades sin implementación detienen el arranque con un error explícito.
 
-- std::recursive_mutex y std::mutex usan sus implementaciones SDK recompiladas, enlazadas con mutex nativos.
-  Se respetan recursión, try-lock, desbloqueo, destrucción y representación estática del SDK de 32 bytes.
-  El ejecutor sigue limitado a un contexto guest activo: no hay prueba de contención entre hilos guest.
-- Compatibilidad pthread para atributos y mutex normales/recursivos, inicializadores estáticos,
-  EBUSY/EPERM/EINVAL/EAGAIN guest y sincronización del contador/propietario en memoria guest.
-- Cadenas C con comprobación de límites; conversiones enteras LP64 con endptr, overflow y errno en TLS.
-  wmemcpy y otras operaciones anchas usan elementos guest de 32 bits, independientemente del wchar_t Windows.
-- Relojes realtime/monotónico, gettimeofday/time, TLS del hilo principal y ThreadType de 0x1c0 bytes;
-  identidad lógica, nombre, prioridad, núcleo lógico cero e información de pila verificadas en PC.
-- Reservas virtuales de hasta 64 GiB sin comprometerlas físicamente. El juego reservó 62 GiB y continuó.
-  Las direcciones lógicas permanecen bajo 39 bits y no se solapan con los módulos. Se conserva el límite
-  agregado de 512 MiB de páginas físicas y los permisos guest de 4 KiB sobre páginas Orbis de 16 KiB.
-- Cruces entre exports SDK y puentes host, fingerprint del SDK y metadatos main/sdk con nombres de objeto
-  distintos. La colisión local_game_program.o del enlace Orbis quedó corregida y comprobada mediante enlace.
-- El lifter ya no incorpora funciones SDK contiguas por un fallthrough imposible después de una instrucción
-  que siempre atrapa. Los main generados anteriores y sus objetos se conservaron sin regenerarlos.
-- nn::oe::Initialize crea y posee un evento nativo y libera sus recursos al finalizar/parar. Los perfiles
-  Nintendo solicitados se registran como hints; no se aplican frecuencias Tegra ni se cambian relojes nativos.
-  Notificaciones, foco y política de energía siguen pendientes de adaptación completa.
+## Implementación gráfica real y límites
 
-La capa de plataforma conserva archivos de 64 bits, módulos, sync/TLS/eventos/semáforos, hilos nativos y
-fibras con pila protegida. Hay adaptadores DualShock 4, PCM AudioOut y dos framebuffers CPU con texto propio.
-Están compilados para Orbis y comprobados con pruebas sintéticas; no equivalen a HID/audio/NVN del juego integrados.
-El bootstrap usa la pila guest de 1 MiB solicitada por este NPDM y una pila nativa independiente de 16 MiB.
-Las funciones C muy grandes se dividen en helpers de 256 instrucciones; el presupuesto cuenta checkpoints,
-no instrucciones ni FPS. El código completo se compiló a -O0 para esta prueba de arranque, no de rendimiento.
+- Los pools NVN ordinarios crean VkBuffer y memoria nativa mapeada. No se devuelven direcciones CPU
+  como supuestas direcciones físicas de GPU: el espacio virtual del guest necesita resolución del traductor.
+- Las transferencias CPU esperan el backend antes de acceder a su memoria. Las tablas mantienen descriptores
+  virtuales propios de 32 bytes; no se envían descriptores Tegra a GCN ni se anuncian como VkDescriptorSet.
+- Las funciones puras de estados NVN y SamplerBuilder ejecutan el código recompilado del SDK propio.
+  Se preservan sus formatos exactos; esto todavía no los traduce a pipelines GCN/Vulkan.
+- El sampler Vulkan admite los filtros y wraps implementados, comparación y borde negro transparente.
+  Modos de borde, anisotropía y reducción aún no implementados se rechazan antes de crear el objeto.
+- La compresión fast-clear opcional se rechaza devolviendo falso. No se simula una inscripción exitosa.
+- Se mantienen los adaptadores DualShock 4, AudioOut y VideoOut. Todavía no están conectados al HID/audio
+  del juego ni constituyen un renderer de Smash.
 
-## Pruebas disponibles completadas
+La prueba propia `native_graphics_probe.py` comprueba fences, creación de sampler, rechazo de un modo
+no admitido y una **copia real de GPU de 65.536 bytes**, con barrera de memoria y lectura exacta del patrón.
+No dibuja imágenes del juego. No hay capa Khronos de validación instalada en este PC; la comprobación con
+esa capa queda pendiente y no se declara satisfecha.
 
-- **476 comprobaciones C**: plataforma 52, servicios 49, medios 47, fibras 21 y recompiler/runtime 307.
-- **31 pruebas Python**, sin omisiones. Incluyen 1.000 casos contra Unicorn ARM64 y 1.000 comparaciones
-  de estado nativo entre C dividido y sin dividir, además del cambio de contexto SysV en Unicorn x86-64.
-- Modelo Windows de páginas Orbis: permisos parciales, canarios, cero al recomprometer y reserva de 62 GiB
-  con solo una página host de 16 KiB comprometida al final del rango.
-- rb_test upstream: 211 rollbacks, 512 frames resimulados, profundidad máxima 6; todos pasaron.
-  Es una simulación de prueba, no rollback ni partidas de Smash verificadas.
-- Compilación de los cuatro módulos de esa prueba para Orbis; enlace ELF/FSELF y empaquetado de fixtures
-  propias; firmas/digests y payload extraído comparados. Variante estática propia enlazada en Windows/Orbis.
+## SPIR-V a GCN
 
-Evidencia: [verification.json](docs/ps4/verification.json), [salidas](docs/ps4/host-results.txt),
-[manifiesto público](docs/ps4/package-manifest.json), [validación](docs/ps4/package-validation.txt).
-Las paradas de SVC, dirección inválida, presupuesto y free inválido son pruebas negativas esperadas.
-El arranque real retorna una parada controlada de import pendiente, no un resultado de gameplay correcto.
+Se construyeron los 478 fuentes seleccionados del compilador externo tanto para Windows como para Orbis.
+Se corrigieron en copias de compilación los generadores faltantes, ABI de pthreads/condición Windows,
+BLAKE3 portable, capacidades SPIR-V y selección de subgrupos. El shim externo de `vk_pipeline.h` era
+un no-op: provocaba wave32 en grupos compute pequeños, inválido para GFX7. Ahora respeta wave64.
 
-## Paquete experimental y pendientes
+Tres shaders originales propios pasan en Windows: vertex, fragment y compute con escritura SSBO.
+Cada uno genera 44 bytes de código GCN dentro de un contenedor validado, es determinista y cambia sus
+instrucciones al variar una constante. El compute conserva un slot de tabla de recursos y grupo 1x1x1.
+Los tres se enlazan también en un ELF Orbis. **Ni estos shaders ni shaders del juego se ejecutaron en GCN.**
+La prueba no demuestra todavía la ABI de recursos, cálculos ni salida visual en PS4.
 
-El paquete privado de arranque se generó en build_ps4/ps4-private-full/ con el main completo y las 67 funciones
-SDK. Tamaño: 1.025.048.576 bytes; SHA-256: 27b0b29ca14321e8a1837fd3a63a5deb3b413b5744c06ce17f2ddbce415caee8.
-ELF/FSELF, firmas/digests y payload extraído fueron validados. Se reutilizaron todos los objetos del main;
-solo se recompilaron cinco fuentes SDK. Contiene material derivado del juego y **no se publica**.
-El paquete público SSBU Runtime Bootstrap, SSBD00001, APP_VER 1.01 contiene exclusivamente pruebas propias,
-licencias y materiales homebrew OpenOrbis. El release/tag v0.1.0 se conserva.
+## Shaders reales del juego
 
-El siguiente punto de software es adaptar foco/notificaciones de nn::oe, después continuar los imports
-observados en nnMain. No se presenta este import pendiente como un bloqueo que obligue a probar hardware.
-Quedan unwinder/excepciones C++, múltiples contextos guest, módulos NRO, RomFS y puentes completos nn::fs,
-HID/audio y NVN. El renderer upstream requiere Vulkan 1.3; el framebuffer CPU no dibuja escenas de Smash.
+La captura privada del primer SetShaders permitió usar el traductor Maxwell portátil existente.
+El ciclo automático de captura, conversión y nuevo arranque produjo **15 shaders reales en SPIR-V**
+y creó sus 15 módulos Vulkan. La caché comprueba un fingerprint de control, código y constantes;
+no identifica un shader solo por una dirección de memoria reutilizable.
 
-CRT/ABI, reservas virtuales grandes, permisos, flips, audio, mandos y comportamiento 13.52/GoldHEN requieren
-validación física. La prueba concreta está preparada en [hardware-probe.md](docs/ps4/hardware-probe.md).
-No hay mediciones de FPS ni compatibilidad física confirmada. Las claves, ExeFS, respaldos y código generado
-no se suben a GitHub; el checkout original permanece intacto.
+Los 15 SPIR-V también se compilaron con el backend GFX7 y pasaron la validación estructural de sus
+contenedores GCN, sin advertencias del compilador. Se habilitó la capacidad DemoteToHelperInvocation
+que NIR/ACO ya implementan y que el wrapper omitía; en Vulkan se habilita solo si el dispositivo
+la soporta. Esto **no demuestra la corrección semántica, ABI de recursos ni ejecución de esos shaders
+en PS4**. Los binarios y textos generados quedan exclusivamente en build_ps4/.
 
-Referencia pública para tamaño ThreadType: [nnsdk-rs](https://github.com/ultimate-research/nnsdk-rs/blob/master/src/nn/os.rs).
-Los offsets usados se contrastaron con accesores del SDK local; no se publicó su código.
+El recorder conserva snapshots de estados y asociaciones de pools; las listas solo aplican esos
+estados al contexto lógico de cola. Draw, dispatch, clears y copias de comandos sin executor siguen
+parando explícitamente. El sort concreto de uint32 con std::less usa qsort nativo con rango comprobado.
+
+## Backend PS4
+
+Se compilaron 27 fuentes OpenGNM y 19 de vulkan-ps4, conservando sus fuentes externas originales.
+La revisión local de vulkan-ps4 expone Vulkan 1.0 y tiene entry points sin implementación y sincronización
+que no espera la jubilación real de GPU. No basta como reemplazo del renderer upstream Vulkan 1.3.
+
+Se integra opcionalmente una ruta directa OpenGNM (`--ps4-gnm-root`, `--ps4-gnm-library`). Inicializa memoria
+directa, emite comandos nativos y exige un EOP escrito realmente por la GPU. Un timeout conserva la memoria
+potencialmente en vuelo. Pools y fences tienen rutas Orbis compiladas; los samplers y el renderer GCN siguen
+pendientes. No se copian los límites de la GPU del PC a PS4.
+
+El ejecutable completo con OpenGNM y las 198 funciones SDK se enlazó reutilizando los 1.162 objetos main.
+No se ejecutó en PS4. Los PKG privados anteriores se conservan; no se publican archivos derivados del juego.
+Esta revisión no se presenta como un PKG jugable ni como una primera imagen de Smash.
+
+## Verificación y continuación
+
+- 517 comprobaciones C: 52 plataforma, 49 servicios, 47 medios, 21 fibras y 348 runtime.
+- 34 pruebas Python, sin omisiones, incluidos 1.000 casos contra Unicorn ARM64.
+- Enlace estático host/Orbis, ELF/FSELF y empaquetado de fixtures propias, hashes y payload releído.
+- Prueba upstream de rollback: 211 rollbacks y 512 frames resimulados; no son partidas verificadas de Smash.
+- Pruebas originales del compilador y transferencia Vulkan descritas arriba.
+
+Evidencia resumida: [arranque](docs/ps4/private-boot-summary.json),
+[gráficos](docs/ps4/graphics-progress.json), [regresiones](docs/ps4/verification.json).
+Los logs completos, binarios, recursos y código recompilado permanecen locales.
+
+El trabajo de software inmediato es implementar TextureBuilder, el layout de memoria guest, las imágenes
+nativas, descriptores, pipelines y ejecución/presentación de comandos; después seguir hasta abrir data.arc. Siguen pendientes excepciones/unwinder, módulos NRO, servicios que aparezcan y la integración
+HID/audio. La falta de estos componentes no se presenta como una obligación de probar hardware.
+
+La primera incertidumbre específica de hardware en la nueva ruta PS4 es el EOP de OpenGNM, además de CRT,
+reservas de 62 GiB y permisos Orbis. No se solicita probar cada cambio. No hay mediciones de FPS ni
+compatibilidad 13.52/GoldHEN confirmada.
+
+Fuentes externas: [OpenGNM](https://github.com/PS4-OpenGNM/opengnm),
+[PSBC](https://github.com/PS4-OpenGNM/opengnm-psbc),
+[vulkan-ps4](https://github.com/PS4-OpenGNM/vulkan-ps4),
+[OpenOrbis](https://github.com/OpenOrbis/OpenOrbis-PS4-Toolchain).

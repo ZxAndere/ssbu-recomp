@@ -29,13 +29,14 @@ static const uint32_t fragment[]={
     0x00050036,3,1,0,4, 0x000200f8,11,
     0x0003003e,2,10, 0x000100fd,0x00010038
 };
-/* layout(local_size_x=4) in; layout(set=0,binding=0,std430) buffer
+/* Dispatch exactly one 1x1x1 group: no competing non-atomic SSBO writers.
+ * layout(local_size_x=1) in; layout(set=0,binding=0,std430) buffer
  * Output { uint value; } output_data; void main(){ output_data.value=42; } */
 static const uint32_t compute[]={
     0x07230203,0x00010000,0,13,0,
     0x00020011,1, 0x0003000e,0,1,
     0x0005000f,5,10,0x6e69616d,0,
-    0x00060010,10,17,4,1,1,
+    0x00060010,10,17,1,1,1,
     0x00030047,4,3, 0x00050048,4,0,35,0,
     0x00040047,6,34,0, 0x00040047,6,33,0,
     0x00020013,1, 0x00030021,2,1, 0x00040015,3,32,0,
@@ -82,7 +83,7 @@ int main(void) {
             const GnmInputUsageSlot *slots=(const GnmInputUsageSlot *)(cs+1);
             for (unsigned slot=0;slot<cs->common.numinputusageslots;++slot)
                 resource_slots+=slots[slot].usagetype==GNM_SHINPUTUSAGE_PTR_INDIRECTRESOURCETABLE;
-            valid=resource_slots==1 && cs->registers.computenumthreadx==4 &&
+            valid=resource_slots==1 && cs->registers.computenumthreadx==1 &&
                 cs->registers.computenumthready==1 && cs->registers.computenumthreadz==1;
         }
         int deterministic=0,changed=0;
