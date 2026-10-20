@@ -1,4 +1,4 @@
-> **PS4 development branch:** standalone platform diagnostic only; Smash Ultimate has not run on PS4.
+> **PS4 development branch:** native bootstrap with controller/audio/framebuffer backends and bounded static recompilation; Smash Ultimate gameplay has not run on PS4.
 > [Audit](PS4_AUDIT.md) · [Roadmap](PS4_ROADMAP.md) · [Verified progress](PS4_PROGRESS.md) · [Build diagnostic](PS4_BUILD.md).
 > The Windows project described below is the upstream implementation.
 

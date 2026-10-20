@@ -98,7 +98,7 @@ int sp_fiber_create(SpFiber **out,size_t stack_size,SpThreadFn fn,void *argument
 }
 int sp_fiber_resume(SpFiber *fiber) {
     FiberThread *state=thread_state();
-    if (!fiber || !state || fiber->owner!=state || fiber==state->current || fiber->finished) return SP_INVALID;
+    if (!fiber || !state || fiber->owner!=state || fiber==state->current || fiber->finished || fiber->references) return SP_INVALID;
     SpFiber *caller=state->current;
     fiber->caller=caller; ++caller->references;
     transfer(caller,fiber);

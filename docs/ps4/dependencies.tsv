@@ -4527,22 +4527,59 @@ runtime/osk.c	371	Timing	GetTickCount64	ULONGLONG now = GetTickCount64();
 runtime/osk.c	402	Threads/sync	InterlockedExchange	InterlockedExchange(&g_on, 0);
 runtime/platform/common.c	43	Win32	_WIN32	#ifdef _WIN32
 runtime/platform/common.c	44	Filesystem	_fseeki64	if (_fseeki64(file, (int64_t)offset, SEEK_SET)) result = SP_IO;
+runtime/platform/fiber.c	3	Win32	_WIN32	#ifdef _WIN32
+runtime/platform/fiber.c	5	Win32	windows.h	#include <windows.h>
+runtime/platform/fiber.c	19	Win32	_WIN32	#ifdef _WIN32
+runtime/platform/fiber.c	39	Win32	_WIN32	#ifdef _WIN32
+runtime/platform/fiber.c	41	Threads/sync	ConvertThreadToFiberEx	state->root.native=state->converted ? ConvertThreadToFiberEx(NULL,FIBER_FLAG_FLOAT_SWITCH) : GetCurrentFiber();
+runtime/platform/fiber.c	45	Win32	_WIN32	#ifdef _WIN32
+runtime/platform/fiber.c	54	Win32	_WIN32	#ifdef _WIN32
+runtime/platform/fiber.c	55	Threads/sync	SwitchToFiber	SwitchToFiber(to->native);
+runtime/platform/fiber.c	60	Win32	_WIN32	#ifdef _WIN32
+runtime/platform/fiber.c	61	Win32	WINAPI	static VOID WINAPI fiber_entry(void *argument) {
+runtime/platform/fiber.c	80	Win32	_WIN32	#ifdef _WIN32
+runtime/platform/fiber.c	81	Threads/sync	CreateFiberEx	fiber->native=CreateFiberEx(stack_size,stack_size,FIBER_FLAG_FLOAT_SWITCH,fiber_entry,fiber);
+runtime/platform/fiber.c	118	Win32	_WIN32	#ifdef _WIN32
+runtime/platform/fiber.c	119	Threads/sync	DeleteFiber	DeleteFiber(fiber->native);
+runtime/platform/fiber.c	135	Win32	_WIN32	#ifdef _WIN32
+runtime/platform/files.c	9	Win32	_WIN32	#ifdef _WIN32
+runtime/platform/files.c	10	Filesystem	_fseeki64	return _fseeki64(file, (int64_t)offset, SEEK_SET) ? SP_IO : SP_OK;
+runtime/platform/files.c	28	Win32	_WIN32	#ifdef _WIN32
+runtime/platform/files.c	29	Filesystem	_fseeki64	int rc = _fseeki64(file->native, 0, SEEK_END) ? SP_IO : SP_OK;
+runtime/platform/files.c	30	Filesystem	_ftelli64	int64_t value = _ftelli64(file->native);
 runtime/platform/windows.c	2	Win32	windows.h	#include <windows.h>
 runtime/platform/windows.c	6	Win32	HANDLE	struct SpThread { HANDLE handle; SpThreadFn fn; void *argument; };
 runtime/platform/windows.c	7	Threads/sync	CRITICAL_SECTION	struct SpMutex { CRITICAL_SECTION native; };
-runtime/platform/windows.c	16	Timing	QueryPerformanceCounter	QueryPerformanceCounter(&counter);
-runtime/platform/windows.c	17	Timing	QueryPerformanceFrequency	QueryPerformanceFrequency(&frequency);
-runtime/platform/windows.c	22	Timing	Sleep	void sp_sleep_ms(unsigned milliseconds) { Sleep(milliseconds); }
-runtime/platform/windows.c	29	Memory	MEM_COMMIT, MEM_RESERVE, PAGE_READWRITE, VirtualAlloc	pointer = VirtualAlloc(address, rounded, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-runtime/platform/windows.c	32	Memory	VirtualFree	VirtualFree(pointer, 0, MEM_RELEASE);
-runtime/platform/windows.c	40	Memory	VirtualFree	if (!VirtualFree(memory->data, 0, MEM_RELEASE)) return SP_SYSTEM;
-runtime/platform/windows.c	44	Win32	DWORD, WINAPI	static DWORD WINAPI thread_entry(void *argument) {
-runtime/platform/windows.c	55	Threads/sync	CreateThread	thread->handle = CreateThread(NULL, 0, thread_entry, thread, 0, NULL);
-runtime/platform/windows.c	62	Threads/sync	WaitForSingleObject	if (WaitForSingleObject((*thread)->handle, INFINITE) != WAIT_OBJECT_0)
-runtime/platform/windows.c	64	Threads/sync	CloseHandle	if (!CloseHandle((*thread)->handle)) return SP_SYSTEM;
-runtime/platform/windows.c	73	Threads/sync	InitializeCriticalSectionEx	if (!InitializeCriticalSectionEx(&mutex->native, 0, 0)) {
-runtime/platform/windows.c	81	Threads/sync	EnterCriticalSection	EnterCriticalSection(&mutex->native); return SP_OK;
-runtime/platform/windows.c	85	Threads/sync	LeaveCriticalSection	LeaveCriticalSection(&mutex->native); return SP_OK;
+runtime/platform/windows.c	8	Threads/sync	CONDITION_VARIABLE	struct SpCond { CONDITION_VARIABLE native; };
+runtime/platform/windows.c	9	Win32	HMODULE	struct SpModule { HMODULE native; };
+runtime/platform/windows.c	10	Win32	DWORD	struct SpTls { DWORD native; };
+runtime/platform/windows.c	19	Timing	QueryPerformanceCounter	QueryPerformanceCounter(&counter);
+runtime/platform/windows.c	20	Timing	QueryPerformanceFrequency	QueryPerformanceFrequency(&frequency);
+runtime/platform/windows.c	25	Timing	Sleep	void sp_sleep_ms(unsigned milliseconds) { Sleep(milliseconds); }
+runtime/platform/windows.c	32	Memory	MEM_COMMIT, MEM_RESERVE, PAGE_READWRITE, VirtualAlloc	pointer = VirtualAlloc(address, rounded, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+runtime/platform/windows.c	35	Memory	VirtualFree	VirtualFree(pointer, 0, MEM_RELEASE);
+runtime/platform/windows.c	43	Memory	VirtualFree	if (!VirtualFree(memory->data, 0, MEM_RELEASE)) return SP_SYSTEM;
+runtime/platform/windows.c	47	Win32	DWORD, WINAPI	static DWORD WINAPI thread_entry(void *argument) {
+runtime/platform/windows.c	58	Threads/sync	CreateThread	thread->handle = CreateThread(NULL, 0, thread_entry, thread, 0, NULL);
+runtime/platform/windows.c	65	Threads/sync	WaitForSingleObject	if (WaitForSingleObject((*thread)->handle, INFINITE) != WAIT_OBJECT_0)
+runtime/platform/windows.c	67	Threads/sync	CloseHandle	if (!CloseHandle((*thread)->handle)) return SP_SYSTEM;
+runtime/platform/windows.c	76	Threads/sync	InitializeCriticalSectionEx	if (!InitializeCriticalSectionEx(&mutex->native, 0, 0)) {
+runtime/platform/windows.c	84	Threads/sync	EnterCriticalSection	EnterCriticalSection(&mutex->native); return SP_OK;
+runtime/platform/windows.c	88	Threads/sync	LeaveCriticalSection	LeaveCriticalSection(&mutex->native); return SP_OK;
+runtime/platform/windows.c	104	Win32	DWORD	DWORD ms = timeout == UINT64_MAX ? INFINITE :
+runtime/platform/windows.c	105	Win32	DWORD	(timeout / 1000 >= INFINITE - 1 ? INFINITE - 1 : (DWORD)(timeout / 1000 + !!(timeout % 1000)));
+runtime/platform/windows.c	107	Win32	GetLastError	return GetLastError() == ERROR_TIMEOUT ? SP_TIMEOUT : SP_SYSTEM;
+runtime/platform/windows.c	111	Threads/sync	WakeAllConditionVariable, WakeConditionVariable	if (broadcast) WakeAllConditionVariable(&cond->native); else WakeConditionVariable(&cond->native);
+runtime/platform/windows.c	122	Threads/sync	TlsAlloc	key->native = TlsAlloc();
+runtime/platform/windows.c	128	Threads/sync	TlsSetValue	return TlsSetValue(key->native, value) ? SP_OK : SP_SYSTEM;
+runtime/platform/windows.c	130	Threads/sync	TlsGetValue	void *sp_tls_get(SpTls *key) { return key ? TlsGetValue(key->native) : NULL; }
+runtime/platform/windows.c	133	Threads/sync	TlsFree	if (!TlsFree((*key)->native)) return SP_SYSTEM;
+runtime/platform/windows.c	140	DLL/ABI	LoadLibraryA	module->native = LoadLibraryA(path);
+runtime/platform/windows.c	146	DLL/ABI	GetProcAddress	*symbol = (void *)(uintptr_t)GetProcAddress(module->native, name);
+runtime/platform/windows.c	151	DLL/ABI	FreeLibrary	if (!FreeLibrary((*module)->native)) return SP_SYSTEM;
+runtime/platform/windows.c	157	Win32	DWORD	DWORD old, mode = access & SP_WRITE ? PAGE_READWRITE : access & SP_READ ? PAGE_READONLY : PAGE_NOACCESS;
+runtime/platform/windows.c	157	Memory	PAGE_NOACCESS, PAGE_READWRITE	DWORD old, mode = access & SP_WRITE ? PAGE_READWRITE : access & SP_READ ? PAGE_READONLY : PAGE_NOACCESS;
+runtime/platform/windows.c	158	Memory	VirtualProtect	return VirtualProtect(memory->data, memory->size, mode, &old) ? SP_OK : SP_SYSTEM;
 runtime/prof15.c	11	DLL/ABI	ntdll	* that sample shares can be turned into ms: a sample of a thread that is waiting has its innermost frame in ntdll /
 runtime/prof15.c	16	Win32	windows.h	#include <windows.h>
 runtime/prof15.c	22	Win32	DWORD	const char *guest_thread_name_of(DWORD tid);         /* os_threads.c */
@@ -4953,9 +4990,10 @@ scripts/ps4/audit.py	25	Network	InetPton, SOCKET, WSA, WinHttp, closesocket, ioc
 scripts/ps4/audit.py	26	Windows build/tools	.bat, MSVC, Visual Studio, Windows SDK, powershell, vswhere, winreg	"""Windows build/tools"": r""clang\.exe|link\.exe|vswhere|MSVC|Visual Studio|Windows SDK|\.bat\b|powershell|winreg|os\.name\s*==\s*['\""]nt|sys\.platform.*win32"","
 scripts/ps4/audit.py	30	Windows build/tools	.bat	"TEXT_EXTENSIONS = {"".c"", "".cpp"", "".h"", "".inc"", "".py"", "".ps1"", "".bat"", "".sh"", "".md"", "".def"", "".json"", "".ini"", "".txt""}"
 scripts/ps4/build.py	36	Windows build/tools	"os.name == ""nt"	"path = Path(directory) / (name + ("".exe"" if os.name == ""nt"" else """"))"
-scripts/ps4/build.py	50	Windows build/tools	"os.name == ""nt"	"suffix = "".exe"" if os.name == ""nt"" else """""
-scripts/ps4/build.py	84	Windows build/tools	"os.name == ""nt"	"host = ""windows"" if os.name == ""nt"" else (""macos"" if sys.platform == ""darwin"" else ""linux"")"
-scripts/ps4/build.py	85	Windows build/tools	"os.name == ""nt"	"tool = sdk / ""bin"" / host / (""PkgTool.Core.exe"" if os.name == ""nt"" else ""PkgTool.Core"")"
+scripts/ps4/build.py	58	Windows build/tools	"os.name == ""nt"	"suffix = "".exe"" if os.name == ""nt"" else """""
+scripts/ps4/build.py	92	Windows build/tools	"os.name == ""nt"	"host = ""windows"" if os.name == ""nt"" else (""macos"" if sys.platform == ""darwin"" else ""linux"")"
+scripts/ps4/build.py	93	Windows build/tools	"os.name == ""nt"	"tool = sdk / ""bin"" / host / (""PkgTool.Core.exe"" if os.name == ""nt"" else ""PkgTool.Core"")"
+scripts/ps4/verify.py	46	Windows build/tools	clang.exe	clang=args.llvm_bin/'clang.exe'
 scripts/run.py	29	Windows build/tools	.bat	"ap.add_argument('--play', action='store_true', help='what ""Play SSBU.bat"" does: the saves in <build>\\saves, until you quit; '"
 scripts/run.py	44	Windows build/tools	.bat	"print('The game is not built yet (looked in %s): double-click ""Install SSBU.bat"" first.' % a.build)"
 scripts/setup.py	25	SDL3/input	SDL3	options below, from LLVM_ROOT / SDL3_ROOT / VULKAN_HEADERS / GLSLANG_ROOT / SUYU_ROOT, or from <repo>/deps/<name>.

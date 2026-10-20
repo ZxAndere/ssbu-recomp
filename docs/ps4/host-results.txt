@@ -1,0 +1,25 @@
+RESULT: 52 checks, 0 failures
+SERVICES RESULT: 49 checks, 0 failures
+MEDIA RESULT: 47 checks, 0 failures
+FIBER RESULT: 17 checks, 0 failures
+RECOMP RESULT: 213 checks, 0 failures
+test_sysv_context_preserves_registers_and_fp_control (test_context.ContextTests.test_sysv_context_preserves_registers_and_fp_control) ... ok
+test_changed_generated_source_is_rejected (test_link_game.LinkGameTests.test_changed_generated_source_is_rejected) ... ok
+test_changed_input_is_rejected (test_link_game.LinkGameTests.test_changed_input_is_rejected) ... ok
+test_extra_source_is_rejected (test_link_game.LinkGameTests.test_extra_source_is_rejected) ... ok
+test_stage_preserves_original_and_adds_checkpoints (test_link_game.LinkGameTests.test_stage_preserves_original_and_adds_checkpoints) ... ok
+test_invalid_headers_and_segments (test_recomp.RecompilerTests.test_invalid_headers_and_segments) ... ok
+test_lifted_c_matches_unicorn_arm64 (test_recomp.RecompilerTests.test_lifted_c_matches_unicorn_arm64) ... ok
+test_relocation_bounds_and_types (test_recomp.RecompilerTests.test_relocation_bounds_and_types) ... ok
+test_valid_guest_elf (test_recomp.RecompilerTests.test_valid_guest_elf) ... ok
+test_elf_machine_and_type (test_tools.ToolTests.test_elf_machine_and_type) ... ok
+test_incomplete_validator_output_is_rejected (test_tools.ToolTests.test_incomplete_validator_output_is_rejected) ... ok
+test_source_checkout_is_not_an_sdk (test_tools.ToolTests.test_source_checkout_is_not_an_sdk) ... ok
+test_truncated_and_coff_are_rejected (test_tools.ToolTests.test_truncated_and_coff_are_rejected) ... ok
+test_validator_exit_zero_does_not_hide_bad_hash (test_tools.ToolTests.test_validator_exit_zero_does_not_hide_bad_hash) ... ok
+
+----------------------------------------------------------------------
+Ran 14 tests in 0.756s
+
+OK
+rb_test: 211 rollbacks, 512 frames simulated again, deepest 6 frames; all passed

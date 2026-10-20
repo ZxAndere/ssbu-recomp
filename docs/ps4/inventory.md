@@ -5,27 +5,27 @@ Lexical matches include comments, tests, strings and platform guards; counts are
 
 | Area | Text files scanned | Status |
 |---|---:|---|
-| runtime/ | 119 | present |
+| runtime/ | 132 | present |
 | graphics_sdk/ | 0 | absent |
 | tools/lifter/ | 24 | present |
 | tools/port/ | 1 | present |
-| scripts/ | 15 | present |
-| tests/ | 240 | present |
+| scripts/ | 19 | present |
+| tests/ | 243 | present |
 | fighter_sdk/ | 54 | present |
 
 | Category | Matching lines | Files |
 |---|---:|---:|
-| Win32 | 672 | 73 |
-| DLL/ABI | 368 | 94 |
-| Memory | 196 | 32 |
-| Threads/sync | 1273 | 56 |
+| Win32 | 691 | 75 |
+| DLL/ABI | 371 | 95 |
+| Memory | 198 | 32 |
+| Threads/sync | 1283 | 57 |
 | Timing | 332 | 45 |
-| Filesystem | 318 | 33 |
+| Filesystem | 321 | 34 |
 | SDL3/input | 266 | 15 |
 | Graphics | 1356 | 62 |
 | Media Foundation | 340 | 10 |
 | Audio | 60 | 7 |
 | Network | 113 | 6 |
-| Windows build/tools | 196 | 46 |
+| Windows build/tools | 197 | 47 |
 
 Full file/line evidence: [dependencies.tsv](dependencies.tsv).

@@ -1,0 +1,52 @@
+{
+  "base_commit": "ac2ee45",
+  "hardware_tested": false,
+  "gameplay_running": false,
+  "unicorn_arm64_cases": 1000,
+  "package_sha256": "11b2fedff87c16b1c14a0511c523c10b82bd0ee862eedc5da94f38e225aaf61e",
+  "checks": {
+    "host": {
+      "exit_code": 0,
+      "checks": {
+        "SERVICES": 49,
+        "MEDIA": 47,
+        "FIBER": 17,
+        "RECOMP": 213,
+        "platform": 52
+      }
+    },
+    "orbis_package": {
+      "exit_code": 0
+    },
+    "python_tests": {
+      "exit_code": 0,
+      "tests": 14,
+      "skipped": false
+    },
+    "static_link_host": {
+      "exit_code": 0
+    },
+    "static_link_orbis": {
+      "exit_code": 0
+    },
+    "upstream_rb_compile": {
+      "exit_code": 0
+    },
+    "upstream_rb_run": {
+      "exit_code": 0,
+      "summary": "rb_test: 211 rollbacks, 512 frames simulated again, deepest 6 frames; all passed"
+    },
+    "orbis_compile_rb_test": {
+      "exit_code": 0
+    },
+    "orbis_compile_rb_input": {
+      "exit_code": 0
+    },
+    "orbis_compile_rb_wire": {
+      "exit_code": 0
+    },
+    "orbis_compile_rb_timesync": {
+      "exit_code": 0
+    }
+  }
+}

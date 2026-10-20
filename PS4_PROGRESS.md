@@ -1,75 +1,72 @@
-# Progreso verificable PS4
+# Progreso PS4 — bootstrap v0.2.0
 
-Fecha de la sesión: 19 de octubre de 2026. Base upstream: `80c9012`.
-Rama: `ps4/platform-diagnostic`. Copia: `C:\SmashUltimatePS4\ssbu-recomp-ps4`.
-El checkout original `C:\SmashUltimatePS4\ssbu-recomp` permanece en `main` y sin cambios de archivos.
+Continuación de `ac2ee45` en `ps4/platform-diagnostic`. El objetivo de ejecutar Smash en PS4 sigue abierto.
+Esta entrega incorpora servicios, dispositivos, carga ELF y ejecución de C producido por el lifter original.
+**No hay partidas de Smash ejecutándose ni pruebas realizadas en una PS4 física.**
 
-## Resultado
+## Código implementado
 
-| Nivel de evidencia | Resultado de esta sesión |
-|---|---|
-| Código escrito | Abstracción C de plataforma con backends Windows y PS4; diagnóstico autónomo y scripts de auditoría/build |
-| Compilación Windows | Correcta, clang 23.1.3, warnings tratados como errores |
-| Pruebas ejecutadas en Windows | **52 comprobaciones, 0 fallos**, más **5 pruebas Python superadas** |
-| Pruebas negativas | Fixture inexistente devuelve código 1; checkout OpenOrbis sin binarios rechazado con error explícito; ELF ARM64/COFF/truncado y validaciones incompletas o fallidas rechazados |
-| Compilación PS4 | ELF64 x86-64 PIE enlazado y convertido a OELF/FSELF (`eboot.bin`) por OpenOrbis v0.5.4 |
-| PKG | Construido, validaciones de hashes/firmas aprobadas y payload extraído/comparado con los archivos de origen |
-| Pruebas en PS4 real | **Ninguna**; no hay conexión ni log de la consola en esta sesión |
-| Smash en PS4 | **No ejecutado**; el diagnóstico no contiene ni carga el juego |
-| Rendimiento del juego | Sin mediciones de FPS, CPU, GPU, memoria de juego ni latencia |
+| Componente | Implementación | Evidencia |
+|---|---|---|
+| Plataforma | Memoria y permisos, archivos con offset de 64 bits, hilos, mutex, condiciones, eventos, semáforos, TLS y módulos | Windows probado; Orbis compilado |
+| Fibras | Resume/yield, pilas protegidas en Orbis, 16 slots locales por fibra y afinidad al hilo creador | 17 checks Windows; instrucciones SysV reales ejecutadas en Unicorn x86-64, comprobando GPR/RSP/MXCSR/x87 |
+| DualShock 4 | sceUserService/scePad, cuatro usuarios, reconexión, botones Nintendo, zona muerta radial y vibración | Decodificador sintético probado; backend Orbis compilado |
+| Audio | Cola PCM estéreo acotada, worker AudioOut a 48 kHz, bloques de 256 frames, silencio y contadores | FIFO/wrap/overflow/silencio probados; salida física pendiente |
+| Pantalla | Dos framebuffers CPU lineales mediante sceVideoOut, texto propio y estado del arranque | Canarios de memoria en PC; backend compilado |
+| Gráficos upstream | runtime/tex_decode.c integrado sin modificar | BC1 sintético comprobado; no equivale a renderizado 3D del juego |
+| Memoria guest | RECOMP_ACCESS opcional en runtime.h/neon.h; imagen y pila traducidas a asignaciones host | Accesos, permisos y fallos comprobados; Windows mantiene acceso directo por defecto |
+| Cargador | ELF64 AArch64, segmentos/BSS, límites/solapamientos, dynamic y relocaciones RELATIVE/ABS64/GLOB_DAT/JUMP_SLOT | Entradas válidas y malformadas probadas en PC |
+| Recompilación | recomp.py original traduce cinco funciones ARM64 propias a C x86-64 | 1.000 comparaciones contra Unicorn ARM64 y enlace ELF/FSELF PS4 |
+| Ejecución parcial | Tabla estática, entrada configurable, fingerprint, errores recuperables y presupuesto de instrucciones | Incluye bucle infinito, SVC, acceso inválido y tabla incorrecta |
+| Pipeline privado | lift.py, manifiesto SHA-256 de imagen/fuentes, staging y response files | Fuentes/imagen cambiadas rechazadas; fixture enlazada en ambos destinos; entrada PC devolvió 1234 |
 
-## Qué se probó
+El ejecutor guest admite un contexto activo a la vez. Faltan el unwinder C++, migración de fibras,
+handlers guest del SDK y la conexión completa de los dispositivos al juego. El adaptador implementa
+la interfaz principal nnpad; motion y remapeo del menú original quedan pendientes.
 
-El diagnóstico usa la misma interfaz para reloj, memoria RW anónima, hilos, mutex, lectura binaria
-con offset de 64 bits y registros. Comprueba límites y overflow de tamaño, cero inicial,
-alineación de páginas, escritura en los extremos, rechazo de un mapa ocupado sin destruirlo,
-liberación, dos hilos que incrementan un contador 20 000 veces con mutex, lectura parcial/EOF,
-offset superior a 4 GiB, errores de argumentos y monotonía del reloj.
-También incluye helpers reales de `runtime.h` con registros y memoria sintéticos.
-Se han ejecutado esas comprobaciones sobre **Windows**, no sobre Orbis.
+## Pruebas ejecutadas
 
-Las pruebas Python verifican que una carpeta de fuentes no se confunda con un SDK completo,
-el formato y la arquitectura ELF, y que la salida de `pkg_validate` se compruebe aunque el
-empaquetador devuelva código cero después de imprimir un error.
+`scripts/ps4/verify.py` completó:
 
-## Artefactos
+- **378 checks C**: plataforma 52, servicios 49, medios 47, fibras 17, recompilación 213.
+- **14 pruebas Python**, sin omisiones, incluyendo **1.000 casos ARM64** comparados con ejecución nativa.
+- Verificación del cambio de contexto SysV real mediante Unicorn x86-64.
+- Prueba upstream rb_test: todos los casos pasaron; es una simulación de juguete, no online de Smash.
+- Compilación Orbis de rb_test.c, rb_input.c, rb_wire.c y rb_timesync.c.
+- ELF/FSELF y PKG público generados, hashes/firmas validados y payload extraído/comparado.
+- Variante estática local compilada para Windows/PS4, usando exclusivamente código de prueba propio.
 
-Paquete: `build_ps4/ps4/IV0000-SSBD00001_00-SSBUPLATFORMDIAG.pkg`.
-Tamaño del build verificado: **6 619 136 bytes**.
-SHA-256: `39d44dd4b11fdcefeb8f62de5ba04883feb591ba934b9b642eedc8acf36a2056`.
-Title ID: `SSBD00001`; no es el identificador de Smash.
-El [manifiesto](docs/ps4/package-manifest.json) registra también cada archivo empaquetado.
+Evidencia: [verification.json](docs/ps4/verification.json), [salidas](docs/ps4/host-results.txt),
+[manifiesto](docs/ps4/package-manifest.json), [validación PKG](docs/ps4/package-validation.txt).
+Los GUEST STOP de SVC, dirección inválida y presupuesto agotado son pruebas negativas esperadas.
+No se ejecutaron las pruebas de batalla/vídeo ni el diferencial sobre Smash por faltar el dump descifrado.
 
-El PKG está compuesto por el diagnóstico, una fixture de texto propia, licencias y los materiales
-homebrew genéricos del ejemplo OpenOrbis. Se conservan los binarios fuera del árbol versionado;
-la publicación de código no incluye dumps, claves, NSZ, datos generados del juego, firmware ni saves.
+## Comportamiento del PKG
 
-## Archivos de esta entrega
+**SSBU Runtime Bootstrap**, Title ID `SSBD00001`, APP_VER `1.01`.
+Ejecuta las pruebas y el código ARM64 propio recompilado. Intenta cargar `/data/ssbu/main.elf`;
+si falta, lo registra. Si no se enlazó su tabla nativa, informa la dependencia. Nunca ejecuta ARM64 directamente.
 
-- `runtime/platform/{platform.h,common.c,windows.c,ps4.c}`: frontera de plataforma nueva y optativa.
-- `platform/ps4/{diagnostic.c,main.c,fixture.txt,NOTICE.txt,licenses/musl.txt}`: aplicación de prueba.
-- `scripts/ps4/{build.py,audit.py}`: compilación, empaquetado, comprobación y auditoría.
-- `tests/ps4/test_tools.py`: comprobaciones de herramientas sin dependencias del juego.
-- `PS4_AUDIT.md`, `PS4_ROADMAP.md`, `PS4_PROGRESS.md`, `PS4_BUILD.md`, `docs/ps4/`: evidencia y procedimiento.
-- `.gitignore`: exclusiones adicionales para NSZ/XCZ, SDK y salidas Orbis.
-- `README.md`: aviso visible del estado real de la rama PS4.
+Inicializa vídeo, controles y audio y muestra el estado. Cross solicita un tono corto; Options libera
+los dispositivos y deja el proceso en espera. Todo ello está escrito/compilado y pendiente de verificación física.
+El log se anexa a `/data/ssbu-ps4-diagnostic.log`. También puede cerrarse desde el menú PS.
 
-No se conectó esta API al arranque Windows completo ni se sustituyó el runtime por stubs.
-El código nuevo usa `runtime.h` para comprobar una parte real del soporte del lifter, pero todavía
-no traduce ni ejecuta funciones provenientes del respaldo del usuario.
+El paquete público contiene código y fixtures propios, licencias y materiales homebrew OpenOrbis.
+Las compilaciones con código local se separan en `build_ps4/*-private/` y no se publican automáticamente.
 
-## Fallos resueltos y pendientes
+## Bloqueos concretos del juego
 
-Se resolvieron la ausencia del SDK binario/compilador, la declaración POSIX de `fseeko`, la variable
-necesaria para `create-fself`, la selección de .NET para PkgTool y el Content ID de longitud incorrecta.
-Detalles y alternativas están en [la auditoría](PS4_AUDIT.md).
+1. **Entrada ausente:** no se encontró main.elf, ExeFS main/sdk ni prod.keys en las rutas examinadas de
+   C:\SmashUltimatePS4 y ubicaciones habituales. Los NSZ no se modificaron. Hace falta el ejecutable
+   descifrado para generar/comprobar funciones, tablas e imports reales; esto permite seguir en PC sin probar consola.
+2. **Runtime parcial:** se adaptan accesos del lifter y cinco imports libc. Faltan handlers guest del SDK,
+   excepciones/landing pads, heaps, contextos múltiples, NRO y puentes nn::fs/hid/audio/NVN. Los servicios
+   de plataforma implementados son la base de esos puentes, que todavía no están todos conectados.
+3. **GPU:** hay framebuffer CPU. El renderer upstream exige Vulkan 1.3, colas gráficas/compute y shaders.
+   No hay RADV Orbis instalado/validado. Piglet requiere módulos y shaders con otra interfaz y no reemplaza NVN automáticamente.
+4. **Hardware:** CRT, ABI, permisos, flips, sonido, mandos y cierre 13.52/GoldHEN siguen sin verificar.
 
-Permanecen pendientes la ejecución Orbis y su cierre desde el menú PS, controles, framebuffer,
-audio/vídeo, fibras/TLS, módulos, mapa guest completo y renderer 3D. El programa termina las pruebas,
-cierra el log y queda esperando con bajo consumo; no se ha validado un retorno por el CRT en consola.
-El log de hardware debe registrar los resultados de las dos reservas guest de una página para
-decidir si se conserva el mapa directo o se introduce traducción de direcciones.
-
-**Siguiente paso concreto:** instalar este diagnóstico en la PS4, abrirlo, cerrarlo desde el menú PS y
-recuperar `/data/ssbu-ps4-diagnostic.log`. Si no aparece un log, comprobar primero la carga del PKG,
-el CRT y los permisos de `/data`; todavía no corresponde diagnosticar el código del juego.
+Commits publicados: f86036c (servicios), dbdb855 (dispositivos), 127d003 (bootstrap/fibras),
+f9a8a30 (manifiestos/validación). v0.1.0 sigue conservada en su tag/release.
+El checkout original permanece limpio en main. No se publicaron claves, respaldos, saves ni código derivado del juego.
+No existen mediciones de FPS del juego ni una declaración de port terminado.

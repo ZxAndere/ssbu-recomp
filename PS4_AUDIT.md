@@ -1,7 +1,16 @@
 # Auditoría del port a PS4
 
 Fecha: 19 de octubre de 2026. Base revisada: `80c9012` de `Denkishi/ssbu-recomp`.
-El resultado actual es un diagnóstico homebrew independiente. **Smash Ultimate no se ha ejecutado en PS4.**
+El resultado actual es un bootstrap nativo parcial. **Smash Ultimate no se ha ejecutado en PS4.**
+
+## Avances sobre la auditoría inicial
+
+Después de `ac2ee45` se implementaron sync/TLS/módulos/archivos, fibras, DualShock 4, AudioOut,
+framebuffer CPU, carga ELF/relocaciones, traducción guest→host y enlace estático de C generado.
+La evidencia actual está en [PS4_PROGRESS.md](PS4_PROGRESS.md). La tabla siguiente conserva el
+análisis de la base Windows; sus pendientes iniciales deben leerse junto al estado actualizado.
+Los dispositivos están compilados, pendientes de prueba física. El código recompilado ejecutado
+hasta ahora proviene de cinco funciones ARM64 propias, sin código del juego.
 
 ## Alcance y método
 
@@ -87,6 +96,8 @@ antes de seleccionar esta vía. RADV de Linux no se puede suponer utilizable dir
    usa `0x1000` de la [ABI FreeBSD](https://github.com/freebsd/freebsd-src/blob/releng/9.0/sys/sys/mman.h).
    El adaptador usa constantes Orbis explícitas y nunca usa `MAP_FIXED`.
 
-El siguiente bloqueo del runtime es validar el mapa de direcciones guest en consola; después,
-fibras/TLS y la estrategia de presentación 3D. La compatibilidad con firmware 13.52/GoldHEN es
+El bootstrap posterior incorpora traducción guest→host y fibras/TLS; sus pruebas sintéticas ya no
+dependen de reservar las bases originales en consola. Falta comprobar los escapes de punteros de los
+handlers reales con el ExeFS propio y conectar el SDK, excepciones y renderer 3D.
+La compatibilidad con firmware 13.52/GoldHEN es
 información aportada por el usuario, no una combinación comprobada por este proyecto.
