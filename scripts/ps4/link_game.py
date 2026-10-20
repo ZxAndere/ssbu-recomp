@@ -112,7 +112,7 @@ def stage(generated,image,build,entry=0,module='main'):
         else: shutil.copy2(path,target)
         if target.suffix=='.c': sources.append(target)
     fingerprint=image_fingerprint(image)
-    metadata=build/'local_game_program.c'
+    metadata=build/('local_sdk_program.c' if module=='sdk' else 'local_game_program.c')
     metadata_source='''#include "guest.h"
 const SpGuestProgram *sp_linked_game_program(void) {
     static SpGuestProgram program;

@@ -20,6 +20,14 @@ class LinkGameTests(unittest.TestCase):
             self.assertIn('sp_sdk_fn_table',next(p for p in sources if p.name=='table.c').read_text())
             self.assertIn('sp_linked_sdk_program',metadata.read_text())
             self.assertEqual((generated/'table.c').read_text(),text)
+    def test_native_metadata_object_names_do_not_collide(self):
+        with tempfile.TemporaryDirectory() as folder:
+            generated,image,build=self.prepare(folder)
+            sdk_build=build/'sdk'; sdk_build.mkdir()
+            _,main_metadata=stage(generated,image,build)
+            _,sdk_metadata=stage(generated,image,sdk_build,module='sdk')
+            # Orbis objects are named source.stem in the same build folder.
+            self.assertNotEqual(main_metadata.stem,sdk_metadata.stem)
     def test_checkpoints_bound_cycles_without_polling_dispatch_cases(self):
         source='void f_7100000020(Ctx *c) {\n'
         source+='\n'.join('L_%x: c->x[0]++;'%(0x7100000020+i*4) for i in range(512))
