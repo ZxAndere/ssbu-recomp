@@ -1,3 +1,7 @@
+> **PS4 development branch:** standalone platform diagnostic only; Smash Ultimate has not run on PS4.
+> [Audit](PS4_AUDIT.md) · [Roadmap](PS4_ROADMAP.md) · [Verified progress](PS4_PROGRESS.md) · [Build diagnostic](PS4_BUILD.md).
+> The Windows project described below is the upstream implementation.
+
 <div align="center">
 
 <img src="media/og-image.png" alt="OpenSmash-Ultimate" width="100%">

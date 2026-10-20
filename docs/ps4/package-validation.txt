@@ -1,0 +1,56 @@
+[OK]    (Limit) PKG Size @ 0x418
+          The PKG should be aligned to 0x8000 and have a minimum size of 1MB
+[OK]    (Hash) Content Digest @ 0x2920
+          A hash of the Content ID, DRM type, Content Type, PFS Image digest, and Major Param digest
+[OK]    (Hash) Game Digest @ 0x2940
+          The PFS image digest
+[OK]    (Hash) Header Digest @ 0x2960
+          A hash of the first 64 bytes and the 128 bytes at 0x400 of the PKG
+[OK]    (Hash) Major Param Digest @ 0x29A0
+          A hash of the ATTRIBUTE, CATEGORY, FORMAT, and PUBTOOLVER param.sfo entries
+[OK]    (Hash) Param Digest @ 0x29C0
+          A hash of the entire param.sfo file (entry)
+[OK]    (Hash) ENTRY_KEYS digest @ 0x2C60
+          Hash of the ENTRY_KEYS entry
+[OK]    (Hash) IMAGE_KEY digest @ 0x2C80
+          Hash of the IMAGE_KEY entry
+[OK]    (Hash) GENERAL_DIGESTS digest @ 0x2CA0
+          Hash of the GENERAL_DIGESTS entry
+[OK]    (Hash) METAS digest @ 0x2CC0
+          Hash of the METAS entry
+[OK]    (Hash) ENTRY_NAMES digest @ 0x2CE0
+          Hash of the ENTRY_NAMES entry
+[OK]    (Hash) LICENSE_DAT digest @ 0x2D00
+          Hash of the LICENSE_DAT entry
+[OK]    (Hash) LICENSE_INFO digest @ 0x2D20
+          Hash of the LICENSE_INFO entry
+[OK]    (Hash) PSRESERVED_DAT digest @ 0x2D40
+          Hash of the PSRESERVED_DAT entry
+[OK]    (Hash) PARAM_SFO digest @ 0x2D60
+          Hash of the PARAM_SFO entry
+[OK]    (Hash) PLAYGO_CHUNK_DAT digest @ 0x2D80
+          Hash of the PLAYGO_CHUNK_DAT entry
+[OK]    (Hash) PLAYGO_CHUNK_SHA digest @ 0x2DA0
+          Hash of the PLAYGO_CHUNK_SHA entry
+[OK]    (Hash) PLAYGO_MANIFEST_XML digest @ 0x2DC0
+          Hash of the PLAYGO_MANIFEST_XML entry
+[OK]    (Hash) ICON0_PNG digest @ 0x2DE0
+          Hash of the ICON0_PNG entry
+[OK]    (Hash) PFS Signed Digest @ 0x460
+          A hash of the first 0x10000 bytes of the PFS image
+[OK]    (Hash) PFS Image Digest @ 0x440
+          A hash of the entire PFS image
+[OK]    (Hash) Body Digest @ 0x160
+          Hash of the PKG body (entry filesystem)
+[OK]    (Hash) Digest Table Hash @ 0x140
+          Hash of the entry digests table
+[OK]    (Hash) SC Entries Hash 1 @ 0x100
+          Hash of 5 entries (ENTRY_KEYS, IMAGE_KEY, GENERAL_DIGESTS, METAS, DIGESTS)
+[OK]    (Hash) SC Entries Hash 2 @ 0x120
+          Hash of 4 entries (ENTRY_KEYS, IMAGE_KEY, GENERAL_DIGESTS, METAS)
+[OK]    (Hash) PKG Header Digest @ 0xFE0
+          Hash of the first 0xFE0 bytes of the PKG
+[OK]    (Signature) PKG Header Signature @ 0x1000
+          Signed hash of the first 0x1000 bytes of the PKG
+[OK]    (Signature) Debug RIF Signature @ 0x3600
+          Signed hash of the debug RIF secret

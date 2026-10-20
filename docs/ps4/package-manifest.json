@@ -1,0 +1,21 @@
+{
+  "title_id": "SSBD00001",
+  "content_id": "IV0000-SSBD00001_00-SSBUPLATFORMDIAG",
+  "package_sha256": "39d44dd4b11fdcefeb8f62de5ba04883feb591ba934b9b642eedc8acf36a2056",
+  "hardware_tested": false,
+  "contains_game": false,
+  "payload_readback_verified": true,
+  "files": {
+    "eboot.bin": "355b98ad5d326d02810562e72534140f3480cbf5d5302076982f2fefc0d2f50d",
+    "fixture.txt": "4f51f9f6cde06893181cfeb9f3967b1a232a7a529a91cebe941771c0a6b80e39",
+    "NOTICE.txt": "8a50e19b5df55251361beee6933111b0e3ef7f6286cb098565234d7c8a7be749",
+    "licenses/project.txt": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+    "licenses/openorbis.txt": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+    "licenses/musl.txt": "afe1df384787fce3577f3356b8b0d417381483f7c704eacb63f8050349fac77a",
+    "sce_sys/param.sfo": "7afa875be48fade5550f43f4dbac0720146771b3ccb29a114c38ef3ea3a87431",
+    "sce_sys/icon0.png": "f05a2231d10ac03296af14f1554788380e900a04242fa9215bb1cae2631dbf7d",
+    "sce_sys/about/right.sprx": "e3416f9c6152276b494982baf7b65ebcd8052274ffc42f95a776318022842b64",
+    "sce_module/libc.prx": "39ad53672bb0b14895f8465eb1619478ab935f5afe5dbf69c15f02cfc0a75ce6",
+    "sce_module/libSceFios2.prx": "3f8236c5996cf8e9917b8d27706d9743f6603d89de3b9859eacbb9f466b19c01"
+  }
+}

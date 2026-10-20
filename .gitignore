@@ -3,6 +3,8 @@
 
 # dumps, keys, firmware, save data
 *.nsp
+*.nsz
+*.xcz
 *.xci
 *.nca
 *.nso
@@ -67,6 +69,16 @@ deps/
 # scripts/make_release.py: its scratch folder and the runtime package (a Release asset, never committed)
 build_release/
 dist/
+
+# PS4 diagnostic outputs and local SDKs (never source inputs)
+build_ps4/
+*.pkg
+*.oelf
+*.self
+*.prx
+*.sprx
+eboot.bin
+ps4-deps/
 
 # local configuration (build_location.txt: the install location chosen in the installer window, scripts/build_location.py)
 config/
