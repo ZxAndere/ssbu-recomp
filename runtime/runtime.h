@@ -55,10 +55,14 @@ static inline void r1m(uint64_t a) {
 #else
 #define R1M(a, n) ((void)0)
 #endif
-/* Guest memory is mapped at its real address: a guest pointer is a host pointer. */
+/* Default Windows path keeps direct pointers. A translated-memory target can
+ * supply RECOMP_ACCESS before this header; every helper must use that boundary. */
+#ifndef RECOMP_ACCESS
+#define RECOMP_ACCESS(address, size, write) ((void *)(uintptr_t)(address))
+#endif
 #define DEF_MEM(bits) \
-    static inline uint##bits##_t rd##bits(uint64_t a) { uint##bits##_t v; memcpy(&v, (void *)(uintptr_t)a, sizeof v); return v; } \
-    static inline void wr##bits(uint64_t a, uint##bits##_t v) { R1M(a, sizeof v); memcpy((void *)(uintptr_t)a, &v, sizeof v); }
+    static inline uint##bits##_t rd##bits(uint64_t a) { uint##bits##_t v; memcpy(&v, RECOMP_ACCESS(a, sizeof v, 0), sizeof v); return v; } \
+    static inline void wr##bits(uint64_t a, uint##bits##_t v) { R1M(a, sizeof v); memcpy(RECOMP_ACCESS(a, sizeof v, 1), &v, sizeof v); }
 DEF_MEM(8) DEF_MEM(16) DEF_MEM(32) DEF_MEM(64)
 
 /* STXR: store only if the location still holds the value the matching LDXR read. Returns 0 on success. */
@@ -68,15 +72,16 @@ void stx_diag(Ctx *c, uint64_t a, uint64_t expected, uint64_t seen, uint64_t v, 
         if (c->ex_addr != a) { stx_diag(c, a, 0, 0, v, -bits); return 1; } \
         c->ex_addr = ~0ull; \
         R1M(a, bits / 8); \
-        if (__sync_bool_compare_and_swap((uint##bits##_t *)(uintptr_t)a, (uint##bits##_t)c->ex_val, v)) { c->ex_fail = 0; return 0; } \
-        uint##bits##_t seen; memcpy(&seen, (void *)(uintptr_t)a, sizeof seen); \
+        uint##bits##_t *pointer = (uint##bits##_t *)RECOMP_ACCESS(a, sizeof(uint##bits##_t), 1); \
+        if (__sync_bool_compare_and_swap(pointer, (uint##bits##_t)c->ex_val, v)) { c->ex_fail = 0; return 0; } \
+        uint##bits##_t seen; memcpy(&seen, pointer, sizeof seen); \
         stx_diag(c, a, c->ex_val, seen, v, bits); \
         return 1; \
     }
 DEF_STX(8) DEF_STX(16) DEF_STX(32) DEF_STX(64)
 
-static inline V128 rdv(uint64_t a, int n) { V128 v; v.d[0] = 0; v.d[1] = 0; memcpy(&v, (void *)(uintptr_t)a, (size_t)n); return v; }
-static inline void wrv(uint64_t a, const V128 *v, int n) { R1M(a, (uint64_t)n); memcpy((void *)(uintptr_t)a, v, (size_t)n); }
+static inline V128 rdv(uint64_t a, int n) { V128 v; v.d[0] = 0; v.d[1] = 0; memcpy(&v, RECOMP_ACCESS(a, (size_t)n, 0), (size_t)n); return v; }
+static inline void wrv(uint64_t a, const V128 *v, int n) { R1M(a, (uint64_t)n); memcpy(RECOMP_ACCESS(a, (size_t)n, 1), v, (size_t)n); }
 static inline void vzero(V128 *v) { v->d[0] = 0; v->d[1] = 0; }
 
 static inline uint64_t adds64(Ctx *c, uint64_t a, uint64_t b, uint32_t cin) {

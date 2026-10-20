@@ -1,5 +1,6 @@
 #include "platform.h"
 #include "runtime.h"
+#include "guest.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -7,14 +8,10 @@
 static unsigned checks, failures;
 int sp_services_test(const char *fixture, const char *scratch);
 int sp_media_test(void);
+int sp_fiber_test(void);
 #define CHECK(test) do { ++checks; if (!(test)) { ++failures; \
     sp_log("FAIL line %d: %s", __LINE__, #test); } } while (0)
 
-/* These are host-runtime hooks, not game functions. Needed by stx64 below. */
-void stx_diag(Ctx *context, uint64_t address, uint64_t expected, uint64_t seen,
-              uint64_t value, int bits) {
-    (void)context; (void)address; (void)expected; (void)seen; (void)value; (void)bits;
-}
 typedef struct { SpMutex *mutex; unsigned *counter; int error; } Worker;
 static void worker(void *argument) {
     Worker *work = argument;
@@ -124,11 +121,16 @@ int sp_diagnostic(const char *fixture) {
 }
 #ifndef SSBU_PS4
 int main(int argc, char **argv) {
-    if (argc != 2 && argc != 3) { fprintf(stderr, "usage: diagnostic <fixture> [new scratch file]\n"); return 2; }
+    if (argc==3 && !strcmp(argv[1],"--guest-batch")) return sp_guest_batch(argv[2]);
+    if (argc==3 && !strcmp(argv[1],"--guest-inspect")) return sp_guest_inspect(argv[2]);
+    if (argc==3 && !strcmp(argv[1],"--game-boot")) return sp_game_bootstrap(argv[2]) ? 1 : 0;
+    if (argc < 2 || argc > 4) { fprintf(stderr, "usage: diagnostic <fixture> [new scratch file] [synthetic ELF]\n"); return 2; }
     if (sp_init(NULL)) return 2;
     int result = sp_diagnostic(argv[1]);
     result |= sp_services_test(argv[1], argc > 2 ? argv[2] : NULL);
     result |= sp_media_test();
+    result |= sp_fiber_test();
+    if (argc > 3) result |= sp_recomp_test(argv[3]);
     sp_shutdown();
     return result;
 }

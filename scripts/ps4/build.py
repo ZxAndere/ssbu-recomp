@@ -42,6 +42,14 @@ def find_tool(name, directory=None):
     raise RuntimeError(f"Missing {name}; use --llvm-bin <folder containing clang and ld.lld>")
 
 
+def response_run(tool, arguments, path):
+    # A full lift has >1000 object files, beyond Windows' command-line limit.
+    # Forward slashes avoid ambiguity between Windows and GNU response parsers.
+    path.write_text("\n".join('"'+str(arg).replace('\\','/').replace('"','\\"')+'"'
+                              for arg in arguments)+"\n",encoding="utf-8")
+    return run([tool,"@"+str(path)],timeout=300)
+
+
 def ps4_requirements(sdk):
     if not sdk:
         raise RuntimeError("Set OO_PS4_TOOLCHAIN or pass --sdk <OpenOrbis SDK root>")
@@ -78,7 +86,7 @@ def verify_pkg_output(output):
             raise RuntimeError(f"Package validation did not confirm {required}")
 
 
-def package(sdk, build, eboot):
+def package(sdk, build, eboot, game_image=None):
     if len(CONTENT_ID) != 36 or len(TITLE_ID) != 9:
         raise RuntimeError("Invalid PS4 package identifiers")
     host = "windows" if os.name == "nt" else ("macos" if sys.platform == "darwin" else "linux")
@@ -94,6 +102,7 @@ def package(sdk, build, eboot):
     (stage / "sce_sys").mkdir(exist_ok=True)
     shutil.copy2(eboot, stage / "eboot.bin")
     shutil.copy2(ROOT / "platform/ps4/fixture.txt", stage / "fixture.txt")
+    shutil.copy2(ROOT / "build_ps4/smoke/main.elf", stage / "smoke.elf")
     (stage / "licenses").mkdir(exist_ok=True)
     shutil.copy2(ROOT / "LICENSE", stage / "licenses/project.txt")
     shutil.copy2(sdk / "LICENSE", stage / "licenses/openorbis.txt")
@@ -122,9 +131,12 @@ def package(sdk, build, eboot):
         run([tool, "sfo_setentry", sfo, key, "--type", kind,
              "--maxsize", str(length), "--value", value], env=env)
     # A fixed allowlist, never a recursive copy of user files or a dump.
-    files = ["eboot.bin", "fixture.txt", "NOTICE.txt", "licenses/project.txt",
+    files = ["eboot.bin", "fixture.txt", "smoke.elf", "NOTICE.txt", "licenses/project.txt",
              "licenses/openorbis.txt", "licenses/musl.txt", "sce_sys/param.sfo", "sce_sys/icon0.png",
              "sce_sys/about/right.sprx", "sce_module/libc.prx", "sce_module/libSceFios2.prx"]
+    if game_image:
+        shutil.copy2(game_image,stage / "main.elf")
+        files.append("main.elf")
     gp4 = ET.Element("psproject", fmt="gp4", version="1000")
     volume = ET.SubElement(gp4, "volume")
     ET.SubElement(volume, "volume_type").text = "pkg_ps4_app"
@@ -164,7 +176,7 @@ def package(sdk, build, eboot):
                 raise RuntimeError(f"Package read-back mismatch: {relative}")
     manifest = {"title_id": TITLE_ID, "content_id": CONTENT_ID,
                 "package_sha256": hashlib.sha256(pkg.read_bytes()).hexdigest(),
-                "hardware_tested": False, "contains_game": False, "payload_readback_verified": True,
+                "hardware_tested": False, "contains_game": bool(game_image), "payload_readback_verified": True,
                 "files": {f: hashlib.sha256((stage / f).read_bytes()).hexdigest() for f in files}}
     (build / "package-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(f"PKG built and validated: {pkg}\nNot tested on a real PS4.")
@@ -177,9 +189,19 @@ def main():
     parser.add_argument("--sdk", default=os.environ.get("OO_PS4_TOOLCHAIN"))
     parser.add_argument("--check", action="store_true", help="Check tools only")
     parser.add_argument("--package", action="store_true", help="Also build/validate a diagnostic PKG")
+    parser.add_argument("--game-generated", type=Path, help="Local upstream lift output, never published automatically")
+    parser.add_argument("--game-image", type=Path, help="Matching local AArch64 main.elf")
+    parser.add_argument("--game-entry", type=lambda value:int(value,0), default=0, help="Optional guest entry address")
+    parser.add_argument("--private-game-package", action="store_true", help="Explicitly allow a local PKG containing your generated game code")
     args = parser.parse_args()
     if args.package and args.target != "ps4":
         parser.error("--package requires the ps4 target")
+    if bool(args.game_generated)!=bool(args.game_image):
+        parser.error("--game-generated and --game-image must be supplied together")
+    if args.game_generated and args.package and not args.private_game_package:
+        parser.error("A game-derived PKG requires --private-game-package; never upload that output")
+    if args.private_game_package and not (args.game_generated and args.package):
+        parser.error("--private-game-package requires generated game code and --package")
     clang = find_tool("clang", args.llvm_bin)
     sdk = fself = linker = None
     if args.target == "ps4":
@@ -191,33 +213,55 @@ def main():
     if args.check:
         print("Compiler and required target files found (no build performed).")
         return
-    build = ROOT / "build_ps4" / args.target
+    build = ROOT / "build_ps4" / (args.target + ("-private" if args.game_generated else ""))
     build.mkdir(parents=True, exist_ok=True)
+    (ROOT/"build_ps4/toolchain.json").write_text(json.dumps({"llvm_bin":str(clang.parent)}),encoding="utf-8")
+    run([sys.executable, ROOT / "scripts/ps4/generate_smoke.py"])
     sources = [ROOT / "runtime/platform/common.c", ROOT / f"runtime/platform/{'ps4' if sdk else 'windows'}.c",
                ROOT / "runtime/platform/sync.c", ROOT / "runtime/platform/files.c",
+               ROOT / "runtime/platform/fiber.c", ROOT / "platform/ps4/fiber_test.c",
                ROOT / "runtime/platform/media.c", ROOT / "runtime/platform/ui.c", ROOT / "runtime/tex_decode.c",
+               ROOT / "runtime/platform/guest.c", ROOT / "runtime/platform/guest_exec.c",
                ROOT / "platform/ps4/diagnostic.c", ROOT / "platform/ps4/services_test.c", ROOT / "platform/ps4/media_test.c"]
     flags = ["-std=c17", "-O1", "-g", "-Wall", "-Wextra", "-Werror",
              "-fno-strict-aliasing", "-I", str(ROOT / "runtime/platform"), "-I", str(ROOT / "runtime")]
+    target_flags = (["--target=x86_64-pc-freebsd12-elf", "-fPIC", "-funwind-tables", "-DSSBU_PS4", "-D_POSIX_C_SOURCE=200809L",
+                     "-nostdlibinc", "-isystem", str(sdk / "include")] if sdk else [])
+    local_objects=[]
+    if args.game_generated:
+        from link_game import stage
+        local_sources,metadata=stage(args.game_generated,args.game_image,build,args.game_entry)
+        flags += ["-DSP_GAME_LINKED"]
+        if args.private_game_package: flags += ["-DSP_GAME_APP0"]
+        sources.append(metadata)
+        for i,source in enumerate(local_sources):
+            obj=build / ("game_%04d.o"%i)
+            run([clang,*flags,*target_flags,"-Wno-unused-label","-include",ROOT / "runtime/platform/guest_bridge.h",
+                 "-c",source,"-o",obj],timeout=300)
+            local_objects.append(obj)
+    smoke_object = build / "smoke_generated.o"
+    run([clang,*flags,*target_flags,"-Wno-unused-label","-include",ROOT / "runtime/platform/guest_bridge.h",
+         "-c",ROOT / "build_ps4/smoke/smoke_generated.c","-o",smoke_object])
     if not sdk:
         exe = build / "diagnostic.exe"
-        run([clang, *flags, *sources, "-o", exe])
+        response_run(clang,[*flags,*sources,smoke_object,*local_objects,"-o",exe],build/"host-link.rsp")
         with tempfile.TemporaryDirectory(prefix="host-test-", dir=build) as scratch:
-            run([exe, ROOT / "platform/ps4/fixture.txt", Path(scratch) / "io.bin"], timeout=30)
+            run([exe, ROOT / "platform/ps4/fixture.txt", Path(scratch) / "io.bin", ROOT / "build_ps4/smoke/main.elf"], timeout=30)
+        if args.game_generated:
+            run([exe,"--game-boot",args.game_image],timeout=60)
         return
     sources += [ROOT / "platform/ps4/main.c", ROOT / "runtime/platform/pad_ps4.c",
-                ROOT / "runtime/platform/audio_ps4.c", ROOT / "runtime/platform/video_ps4.c"]
-    flags += ["--target=x86_64-pc-freebsd12-elf", "-fPIC", "-funwind-tables", "-DSSBU_PS4", "-D_POSIX_C_SOURCE=200809L",
-              "-nostdlibinc", "-isystem", str(sdk / "include")]
-    objects = []
+                ROOT / "runtime/platform/audio_ps4.c", ROOT / "runtime/platform/video_ps4.c", ROOT / "runtime/platform/context_ps4.S"]
+    flags += target_flags
+    objects = [smoke_object,*local_objects]
     for source in sources:
         obj = build / (source.stem + ".o")
         run([clang, *flags, "-c", source, "-o", obj])
         objects.append(obj)
     elf, oelf, eboot = build / "diagnostic.elf", build / "diagnostic.oelf", build / "eboot.bin"
-    run([linker, "-m", "elf_x86_64", "-pie", "--script", sdk / "link.x", "--eh-frame-hdr",
+    response_run(linker, ["-m", "elf_x86_64", "-pie", "--script", sdk / "link.x", "--eh-frame-hdr",
          "-L" + str(sdk / "lib"), sdk / "lib/crt1.o", *objects, "-lc", "-lkernel",
-         "-lScePad", "-lSceUserService", "-lSceAudioOut", "-lSceVideoOut", "-lSceSystemService", "-o", elf])
+         "-lScePad", "-lSceUserService", "-lSceAudioOut", "-lSceVideoOut", "-lSceSystemService", "-o", elf],build/"orbis-link.rsp")
     verify_elf(elf)
     env = dict(os.environ, OO_PS4_TOOLCHAIN=str(sdk))
     run([fself, "-in", elf, "--out", oelf, "--eboot", eboot, "--paid", "0x3800000000000011"], env=env)
@@ -225,7 +269,7 @@ def main():
         raise RuntimeError("create-fself did not produce an eboot")
     print(f"ELF and FSELF built: {eboot}. Hardware behavior remains unverified.")
     if args.package:
-        package(sdk, build, eboot)
+        package(sdk, build, eboot,args.game_image if args.private_game_package else None)
 
 
 if __name__ == "__main__":

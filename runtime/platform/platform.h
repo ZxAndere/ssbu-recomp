@@ -14,6 +14,7 @@ typedef struct SpSemaphore SpSemaphore;
 typedef struct SpFile SpFile;
 typedef struct SpModule SpModule;
 typedef struct SpTls SpTls;
+typedef struct SpFiber SpFiber;
 typedef void (*SpThreadFn)(void *);
 typedef struct { void *data; size_t size; } SpMemory;
 
@@ -69,6 +70,16 @@ int sp_file_read_at(SpFile *file, uint64_t offset, void *data, size_t size, size
 int sp_file_write_at(SpFile *file, uint64_t offset, const void *data, size_t size, size_t *done);
 int sp_file_flush(SpFile *file);
 int sp_file_close(SpFile **file);
+/* Cooperative fibers are pinned to their creating host thread. Destroy only
+ * a suspended/finished fiber. No stack migration or C++ stack unwinding. */
+int sp_fiber_create(SpFiber **out, size_t stack_size, SpThreadFn fn, void *argument);
+int sp_fiber_resume(SpFiber *fiber);
+int sp_fiber_yield(void);
+int sp_fiber_finished(SpFiber *fiber);
+int sp_fiber_destroy(SpFiber **fiber);
+void *sp_fiber_get_local(unsigned slot);
+int sp_fiber_set_local(unsigned slot, void *value);
+int sp_fiber_thread_shutdown(void);
 /* Binary read at a 64-bit offset; EOF is success with fewer bytes. No writes. */
 int sp_file_read(const char *path, uint64_t offset, void *data, size_t capacity,
                  size_t *bytes_read);

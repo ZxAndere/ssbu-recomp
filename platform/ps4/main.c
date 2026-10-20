@@ -1,16 +1,25 @@
 #include "platform.h"
 #include "media.h"
+#include "guest.h"
 #include <orbis/libkernel.h>
 #include <math.h>
 
 int sp_diagnostic(const char *fixture);
 int sp_services_test(const char *fixture, const char *scratch);
 int sp_media_test(void);
+int sp_fiber_test(void);
 int main(void) {
     if (sp_init("/data/ssbu-ps4-diagnostic.log")) sp_init(NULL);
     int result = sp_diagnostic("/app0/fixture.txt");
     result |= sp_services_test("/app0/fixture.txt", NULL);
     result |= sp_media_test();
+    result |= sp_fiber_test();
+    result |= sp_recomp_test("/app0/smoke.elf");
+#ifdef SP_GAME_APP0
+    int game_result=sp_game_bootstrap("/app0/main.elf");
+#else
+    int game_result=sp_game_bootstrap("/data/ssbu/main.elf");
+#endif
     /* These tiny non-destructive probes expose the first game-host blocker.
      * A failure does not prevent the rest of the standalone diagnostic. */
     const uint64_t addresses[] = {0x7100000000ULL, 0x7300000000ULL};
@@ -25,7 +34,8 @@ int main(void) {
     int video_result = sp_video_open(&video), pad_result = nnpad_init();
     int audio_result = sp_audio_open(&audio);
     sp_log("Device initialization: video=%d pad=%d audio=%d", video_result, pad_result, audio_result);
-    SpUiState state = {"PLATFORM BOOTSTRAP READY", "GAME RUNTIME INTEGRATION IN PROGRESS", {0},0,result,audio_result,0};
+    SpUiState state = {"PLATFORM AND RECOMPILER BOOTSTRAP", game_result==SP_IO ? "GAME MAIN.ELF MISSING IN /DATA/SSBU" :
+        game_result==SP_OK ? "GUEST ENTRY RETURNED - SEE LOG" : "GAME BOOT STOPPED - SEE LOG", {0},0,result,audio_result,0};
     uint64_t previous = 0;
     for (unsigned frame = 0; video; ++frame) {
         nnpad_poll(0); state.pad_present = nnpad_get(0,&state.pad); state.frame = frame;

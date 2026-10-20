@@ -263,7 +263,7 @@ static inline void v_ldn(Ctx *c, uint64_t a, int rt, int n, int sz, int q) {
     for (int i = 0; i < count; i++)
         for (int k = 0; k < n; k++) {
             uint64_t v = 0;
-            memcpy(&v, (void *)(uintptr_t)(a + (uint64_t)((i * n + k) * es)), (size_t)es);
+            memcpy(&v, RECOMP_ACCESS(a + (uint64_t)((i * n + k) * es), (size_t)es, 0), (size_t)es);
             vset(&r[k], sz, i, v);
         }
     for (int k = 0; k < n; k++) c->v[(rt + k) & 31] = r[k];
@@ -274,7 +274,7 @@ static inline void v_stn(Ctx *c, uint64_t a, int rt, int n, int sz, int q) {
         for (int k = 0; k < n; k++) {
             uint64_t v = vget(&c->v[(rt + k) & 31], sz, i);
             R1M(a + (uint64_t)((i * n + k) * es), (uint64_t)es);
-            memcpy((void *)(uintptr_t)(a + (uint64_t)((i * n + k) * es)), &v, (size_t)es);
+            memcpy(RECOMP_ACCESS(a + (uint64_t)((i * n + k) * es), (size_t)es, 1), &v, (size_t)es);
         }
 }
 
