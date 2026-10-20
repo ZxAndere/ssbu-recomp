@@ -22,7 +22,8 @@ def main():
     out=ROOT/'build_ps4/graphics-probe/host'; out.mkdir(parents=True,exist_ok=True)
     config=(root/'config.orbis.mak').read_text().replace('\\\n',' ')
     shared=re.search(r'(?m)^SHARED_FLAGS=([^\n]+)',config)[1].replace('$(OPENGNM_INCLUDE)','../opengnm/include').split()
-    common=['-O1','-g0',*shared,'-Dalloca=__builtin_alloca','-DBLAKE3_NO_SSE2','-DBLAKE3_NO_SSE41','-DBLAKE3_NO_AVX2','-DBLAKE3_NO_AVX512',
+    compat=ROOT/'build_ps4/graphics-probe/mesa-compat'
+    common=['-O1','-g0','-I'+str(compat),*shared,'-Dalloca=__builtin_alloca','-DBLAKE3_NO_SSE2','-DBLAKE3_NO_SSE41','-DBLAKE3_NO_AVX2','-DBLAKE3_NO_AVX512',
             '-Wno-unused-function','-Wno-unused-variable','-Wno-macro-redefined']
     # Each completed Orbis object identifies a source from the actual selected
     # compiler build. Windows uses a different object directory and ABI.
@@ -34,6 +35,7 @@ def main():
         source=Path(str(obj).replace('.orbis.cpp.o','.cpp'))
         if source.exists(): sources.append(source)
     headers=b''.join(x.read_bytes() for folder in ('include','src/compiler','src/util','src/amd') for x in sorted((root/folder).rglob('*.h')))
+    headers+=b''.join(x.read_bytes() for x in sorted(compat.glob('*.h')))
     # HAVE_PTHREAD selects winpthreads' C11 mutex (8 bytes), so the monotonic
     # condition helper must use pthread APIs too, rather than casting that
     # mutex to a 40-byte Windows CRITICAL_SECTION. Keep the public 8-byte
@@ -79,6 +81,7 @@ def main():
             (out/'run.log').write_text(result.stdout+result.stderr); report['run_exit']=result.returncode; report['output']=result.stdout
     (out/'report.json').write_text(json.dumps(report,indent=2)+'\n')
     print(json.dumps(report,indent=2))
+    if failures or report.get('link_exit')!=0 or report.get('run_exit')!=0: raise SystemExit(1)
 
 
 if __name__=='__main__': main()

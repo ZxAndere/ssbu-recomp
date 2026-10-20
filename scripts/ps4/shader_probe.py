@@ -55,12 +55,49 @@ def main():
     # copied source still takes the address of the old inline member. Compile
     # a corrected copy while preserving the external checkout's source file.
     stage=Path(__file__).resolve().parents[2]/'build_ps4/graphics-probe'; stage.mkdir(exist_ok=True)
+    # Upstream's standalone vk_pipeline.h replaces subgroup selection with
+    # a no-op. GFX7 cannot execute wave32, including small compute groups.
+    # Restore selection/clamping semantics before RADV chooses an ISA wave.
+    compat=stage/'mesa-compat'; compat.mkdir(exist_ok=True)
+    pipeline=(root/'src/vulkan/runtime/vk_pipeline.h').read_text()
+    old='''   (void)shader; (void)subgroup_size; (void)min_subgroup_size;
+   (void)max_subgroup_size; (void)spirv_version; (void)info_pNext;
+   (void)allow_varying; (void)require_full;'''
+    new='''   uint32_t required=0;
+   for (const VkBaseInStructure *p=info_pNext;p;p=p->pNext)
+      if (p->sType==VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO)
+         required=((const VkPipelineShaderStageRequiredSubgroupSizeCreateInfo *)p)->requiredSubgroupSize;
+   if (required) {
+      assert(required<=128 && required && !(required&(required-1)));
+      shader->info.api_subgroup_size=required;
+      shader->info.min_subgroup_size=shader->info.max_subgroup_size=required;
+   } else if (!allow_varying && spirv_version<0x10600 && subgroup_size) {
+      shader->info.api_subgroup_size=subgroup_size;
+      shader->info.max_subgroup_size=subgroup_size;
+      if (require_full) shader->info.min_subgroup_size=subgroup_size;
+   }
+   if (max_subgroup_size) {
+      assert(min_subgroup_size);
+      shader->info.max_subgroup_size=MIN2(shader->info.max_subgroup_size,max_subgroup_size);
+      shader->info.min_subgroup_size=MAX2(shader->info.min_subgroup_size,min_subgroup_size);
+   }
+   assert(shader->info.min_subgroup_size<=shader->info.max_subgroup_size);'''
+    if old not in pipeline: raise RuntimeError('Unknown upstream subgroup shim; review before staging')
+    header=compat/'vk_pipeline.h'; pipeline=pipeline.replace(old,new)
+    if not header.exists() or header.read_text()!=pipeline: header.write_text(pipeline)
+    command[-1]+=' -I'+compat.as_posix()
     shader=stage/'radv_shader.c'; original=(root/'src/amd/vulkan/radv_shader.c').read_text()
     corrected=original.replace('&device->compiler_info','device->compiler_info')
     if not shader.exists() or shader.read_text()!=corrected: shader.write_text(corrected)
-    rule='src/amd/vulkan/radv_shader.orbis.o: '+shader.as_posix()+'\n\t$(CC) $(CFLAGS) -c '+shader.as_posix()+' -o $@\n'
+    rule='src/amd/vulkan/radv_shader.orbis.o: '+shader.as_posix()+' '+header.as_posix()+'\n\t$(CC) -I'+compat.as_posix()+' $(CFLAGS) -c '+shader.as_posix()+' -o $@\n'
     compiler=stage/'psbc_compile.c'; original=(root/'libpsbc/psbc_compile.c').read_text()
-    corrected=original.replace('compiler_info.ac = &ac_info;','compiler_info.ac = &ac_info;\n    compiler_info.spirv_caps.Shader = true;')
+    corrected=original.replace('compiler_info.ac = &ac_info;',
+        'compiler_info.ac = &ac_info;\n    compiler_info.spirv_caps.Shader = true;\n'
+        '    compiler_info.subgroup_size = (gfxlevel >= GFX10) ? 32 : 64;\n'
+        '    compiler_info.min_subgroup_size = (gfxlevel >= GFX10) ? 32 : 64;\n'
+        '    compiler_info.max_subgroup_size = 64;')
+    corrected=corrected.replace('RADV_PIPELINE_GRAPHICS, false, &stage.info',
+        'mesa_stage == MESA_SHADER_COMPUTE ? RADV_PIPELINE_COMPUTE : RADV_PIPELINE_GRAPHICS, false, &stage.info')
     if not compiler.exists() or compiler.read_text()!=corrected: compiler.write_text(corrected)
     rule+='libpsbc/psbc_compile.orbis.o: '+compiler.as_posix()+'\n\t$(CC) $(CFLAGS) -c '+compiler.as_posix()+' -o $@\n'
     # This source set ships only BLAKE3's portable implementation. Jaguar has
