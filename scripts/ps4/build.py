@@ -206,6 +206,7 @@ def main():
     parser.add_argument("target", choices=["host", "ps4"])
     parser.add_argument("--llvm-bin", default=os.environ.get("PS4_LLVM_BIN"))
     parser.add_argument("--sdk", default=os.environ.get("OO_PS4_TOOLCHAIN"))
+    parser.add_argument('--host-vulkan-headers',type=Path,help='Opt-in real desktop Vulkan initialization; requires Vulkan-Headers/include')
     parser.add_argument("--check", action="store_true", help="Check tools only")
     parser.add_argument("--package", action="store_true", help="Also build/validate a diagnostic PKG")
     parser.add_argument("--game-generated", type=Path, help="Local upstream lift output, never published automatically")
@@ -218,6 +219,8 @@ def main():
     parser.add_argument("--game-opt", choices=['0','1','2'], default='1', help="Generated C optimization; 0 is useful for compile probes")
     parser.add_argument("--build-label", default='', help="Separate ignored output suffix for independent private probes")
     args = parser.parse_args()
+    if args.host_vulkan_headers and (args.target!='host' or not (args.host_vulkan_headers/'vulkan/vulkan.h').is_file()):
+        parser.error('--host-vulkan-headers requires host and a valid Vulkan-Headers/include directory')
     if not 1 <= args.jobs <= 8: parser.error('--jobs must be 1..8')
     if args.build_label and not re.fullmatch(r'[a-z0-9-]{1,40}',args.build_label): parser.error('Invalid --build-label')
     if args.package and args.target != "ps4":
@@ -299,6 +302,8 @@ def main():
         finally:
             pool.shutdown(wait=True,cancel_futures=True)
         if args.sdk_generated: flags += ['-DSP_SDK_LINKED']
+    # Runtime-only options do not invalidate unchanged translated game objects.
+    if args.host_vulkan_headers: flags += ['-DSP_GUEST_VULKAN','-I',str(args.host_vulkan_headers)]
     smoke_object = build / "smoke_generated.o"
     run([clang,*flags,*target_flags,"-Wno-unused-label","-include",ROOT / "runtime/platform/guest_bridge.h",
          "-c",ROOT / "build_ps4/smoke/smoke_generated.c","-o",smoke_object])

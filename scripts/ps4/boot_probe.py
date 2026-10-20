@@ -24,6 +24,8 @@ def summarize(output,returncode):
             'application_lifecycle_initialized':'GAME APPLICATION: lifecycle initialized' in output,
             'nnmain_entered':'GAME PHASE: nnMain' in output,'stop':result[4],
             'romfs_mounted':'GAME ROMFS: mounted ' in output,
+            'native_desktop_vulkan_device_created':'GAME GRAPHICS: real Vulkan device ' in output,
+            'game_image_rendered':False,
             'resource_opens':int(resources[1]) if resources else 0,
             'resource_reads':int(resources[2]) if resources else 0,
             'resource_bytes_read':int(resources[3]) if resources else 0,

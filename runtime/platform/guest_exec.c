@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "virtual_memory.c"
+#include "native_graphics.c"
 typedef struct { SpMemory memory; uint64_t address; size_t requested; } Allocation;
 typedef struct { GuestVm *vm; uint64_t address; } GuestRegion;
 typedef struct { SpMutex *native; uint64_t address,owner; unsigned depth; int recursive; } GuestMutex;
@@ -39,6 +40,10 @@ typedef struct {
     SpModule *application_module; SpMemory application_status;
     unsigned recording_disabled,time_initialized;
     uint64_t graphics_allocators[2][4];
+    NativeGraphics *graphics; uint64_t graphics_workspace,graphics_workspace_bytes;
+    struct { char name[128]; } nvn_entries[2048]; unsigned nvn_entry_count;
+    uint64_t nvn_device,nvn_builder; uint32_t nvn_builder_flags;
+    unsigned nvn_debugger_disabled;
     GuestEvent events[128]; unsigned char application_event_object[0x30];
     GuestThread threads[33]; Ctx *root_context; unsigned current_thread,next_thread,scheduler_started;
     uint64_t remaining_budget,quantum,next_thread_id;
@@ -48,6 +53,7 @@ typedef struct {
 } Execution;
 static Execution *active;
 static void guest_thread_cooperate(void);
+static void nvn_dispatch(Ctx *context,unsigned index);
 static uint64_t current_thread_object(void);
 uint64_t sp_recomp_budget;
 static char last_error[256];
@@ -120,6 +126,9 @@ void stx_diag(Ctx *context,uint64_t address,uint64_t expected,uint64_t seen,uint
     (void)context; (void)address; (void)expected; (void)seen; (void)value; (void)bits;
 }
 static void invoke(Ctx *context,uint64_t address) {
+    if (address>=0x7900000000ULL && address<0x7900080000ULL && !((address-0x7900000000ULL)%256)) {
+        nvn_dispatch(context,(unsigned)((address-0x7900000000ULL)/256)); return;
+    }
     if (active->bootstrap && address>=0x7600000000ULL && !( (address-0x7600000000ULL)%256 ) &&
         (address-0x7600000000ULL)/256<active->bootstrap->sdk_import_count)
         fail(SP_UNSUPPORTED,active->bootstrap->sdk_imports[(address-0x7600000000ULL)/256],address);
@@ -576,6 +585,7 @@ static int execute(SpGuestImage *image,const SpGuestProgram *program,uint64_t en
         }
     }
     active=NULL; int rc=execution->error;
+    native_graphics_close(&execution->graphics);
     if (execution->resource_opens) sp_log("GAME RESOURCE SUMMARY: opens=%llu reads=%llu bytes=%llu",(unsigned long long)execution->resource_opens,
         (unsigned long long)execution->resource_reads,(unsigned long long)execution->resource_bytes);
     for (unsigned i=0;i<128;++i) if (execution->files[i].native) sp_file_close(&execution->files[i].native);
@@ -962,6 +972,22 @@ static void resource_probe(Ctx *context) {
     if (language_code(14)==UINT64_C(0x3931342d7365)) flags|=16384;
     context->x[0]=flags;
 }
+static void graphics_link_probe(Ctx *context) {
+    const uint64_t text=0x7100003700ULL,builder=text+256; uint64_t flags=0;
+    memcpy(sp_recomp_access(text,28,1),"nvnDeviceBuilderSetDefaults",27);
+    context->x[0]=text; graphics_import(context,"nvnBootstrapLoader"); uint64_t entry=context->x[0];
+    context->x[0]=builder; invoke(context,entry); if (active->nvn_builder==builder) flags|=1;
+    context->x[0]=builder; context->x[1]=7; invoke(context,nvn_entry("nvnDeviceBuilderSetFlags"));
+    context->x[0]=builder; invoke(context,nvn_entry("nvnDeviceBuilderGetFlags")); if (context->x[0]==7) flags|=2;
+    context->x[0]=0; context->x[1]=text; invoke(context,nvn_entry("nvnDeviceGetProcAddress")); if (context->x[0]==entry) flags|=4;
+    context->x[0]=0; invoke(context,nvn_entry("nvnSetExternalDebuggerEnabledNVX")); if (active->nvn_debugger_disabled) flags|=8;
+    for (unsigned i=0;i<700;++i) {
+        char name[64]; snprintf(name,sizeof name,"original_test_unimplemented_%u",i); nvn_entry(name);
+    }
+    if (active->nvn_entry_count==705) flags|=16;
+    if (context->x[9]) invoke(context,nvn_entry("original_test_unimplemented_699"));
+    context->x[0]=flags;
+}
 static void application_probe(Ctx *context) {
     uint64_t passed=0;
     host_import(context,0); SpEvent *event=active->application_event;
@@ -1105,6 +1131,12 @@ int sp_recomp_test(const char *path) {
             memset(&context,0,sizeof context);
             VERIFY(sp_guest_run(image,&resource_program,0x7100000044ULL,&context)==SP_OK);
             for (unsigned bit=0;bit<15;++bit) VERIFY((context.x[0]&(1u<<bit))!=0);
+            const FnEntry graphics_functions[]={{0x7100000044ULL,graphics_link_probe}};
+            SpGuestProgram graphics_program={graphics_functions,1,NULL,0,sp_guest_fingerprint(image)};
+            memset(&context,0,sizeof context);
+            VERIFY(sp_guest_run(image,&graphics_program,0x7100000044ULL,&context)==SP_OK);
+            for (unsigned bit=0;bit<5;++bit) VERIFY((context.x[0]&(1u<<bit))!=0);
+            context.x[9]=1; VERIFY(sp_guest_run(image,&graphics_program,0x7100000044ULL,&context)==SP_UNSUPPORTED);
             const FnEntry application_functions[]={{0x7100000044ULL,application_probe}};
             const DynSym application_symbols[]={{"_ZN2nn2oe10InitializeEv",0,0},{"_ZN2nn2oe8FinalizeEv",0,0},
                 {"_ZN2nn2oe27SetPerformanceConfigurationENS0_15PerformanceModeEi",0,0}};
