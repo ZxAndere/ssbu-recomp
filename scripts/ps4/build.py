@@ -3,12 +3,14 @@
 No downloads, game extraction, installation or deployment occur in this script.
 """
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import shutil
+import signal
 import struct
 import subprocess
 import sys
@@ -22,12 +24,26 @@ CONTENT_ID = "IV0000-SSBD00001_00-SSBUPLATFORMDIAG"
 
 def run(args, *, cwd=ROOT, env=None, timeout=120, capture=False):
     print("+", subprocess.list2cmdline([str(a) for a in args]), flush=True)
-    result = subprocess.run([str(a) for a in args], cwd=cwd, env=env, check=True, timeout=timeout,
-                            capture_output=capture, text=True, errors="replace")
+    process=subprocess.Popen([str(a) for a in args],cwd=cwd,env=env,
+                             stdout=subprocess.PIPE if capture else None,stderr=subprocess.PIPE if capture else None,
+                             text=True,errors='replace',start_new_session=os.name!='nt')
+    try:
+        stdout,stderr=process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        # llvm-mingw's clang.exe is a launcher. Killing only that PID leaves
+        # clang-23.exe consuming CPU/RAM, so terminate the owned process tree.
+        if os.name=='nt':
+            subprocess.run(['taskkill','/PID',str(process.pid),'/T','/F'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        else:
+            os.killpg(process.pid,signal.SIGKILL)
+        process.communicate()
+        raise
+    result=subprocess.CompletedProcess(process.args,process.returncode,stdout,stderr)
     if capture:
         print(result.stdout, end="")
         if result.stderr:
             print(result.stderr, file=sys.stderr, end="")
+    result.check_returncode()
     return result
 
 
@@ -86,7 +102,7 @@ def verify_pkg_output(output):
             raise RuntimeError(f"Package validation did not confirm {required}")
 
 
-def package(sdk, build, eboot, game_image=None):
+def package(sdk, build, eboot, game_image=None, game_sdk_image=None):
     if len(CONTENT_ID) != 36 or len(TITLE_ID) != 9:
         raise RuntimeError("Invalid PS4 package identifiers")
     host = "windows" if os.name == "nt" else ("macos" if sys.platform == "darwin" else "linux")
@@ -137,6 +153,9 @@ def package(sdk, build, eboot, game_image=None):
     if game_image:
         shutil.copy2(game_image,stage / "main.elf")
         files.append("main.elf")
+    if game_sdk_image:
+        shutil.copy2(game_sdk_image,stage / "sdk.elf")
+        files.append("sdk.elf")
     gp4 = ET.Element("psproject", fmt="gp4", version="1000")
     volume = ET.SubElement(gp4, "volume")
     ET.SubElement(volume, "volume_type").text = "pkg_ps4_app"
@@ -191,13 +210,22 @@ def main():
     parser.add_argument("--package", action="store_true", help="Also build/validate a diagnostic PKG")
     parser.add_argument("--game-generated", type=Path, help="Local upstream lift output, never published automatically")
     parser.add_argument("--game-image", type=Path, help="Matching local AArch64 main.elf")
+    parser.add_argument("--sdk-generated", type=Path, help="Optional private translated SDK closure")
+    parser.add_argument("--game-sdk-image", type=Path, help="Matching private sdk.elf; included only in explicitly private packages")
     parser.add_argument("--game-entry", type=lambda value:int(value,0), default=0, help="Optional guest entry address")
     parser.add_argument("--private-game-package", action="store_true", help="Explicitly allow a local PKG containing your generated game code")
+    parser.add_argument("--jobs", type=int, default=2, help="Parallel generated C compilations (1..8)")
+    parser.add_argument("--game-opt", choices=['0','1','2'], default='1', help="Generated C optimization; 0 is useful for compile probes")
+    parser.add_argument("--build-label", default='', help="Separate ignored output suffix for independent private probes")
     args = parser.parse_args()
+    if not 1 <= args.jobs <= 8: parser.error('--jobs must be 1..8')
+    if args.build_label and not re.fullmatch(r'[a-z0-9-]{1,40}',args.build_label): parser.error('Invalid --build-label')
     if args.package and args.target != "ps4":
         parser.error("--package requires the ps4 target")
     if bool(args.game_generated)!=bool(args.game_image):
         parser.error("--game-generated and --game-image must be supplied together")
+    if bool(args.sdk_generated)!=bool(args.game_sdk_image) or (args.sdk_generated and not args.game_generated):
+        parser.error('--sdk-generated and --game-sdk-image require each other and a main game lift')
     if args.game_generated and args.package and not args.private_game_package:
         parser.error("A game-derived PKG requires --private-game-package; never upload that output")
     if args.private_game_package and not (args.game_generated and args.package):
@@ -213,7 +241,7 @@ def main():
     if args.check:
         print("Compiler and required target files found (no build performed).")
         return
-    build = ROOT / "build_ps4" / (args.target + ("-private" if args.game_generated else ""))
+    build = ROOT / "build_ps4" / (args.target + ("-private" if args.game_generated else "") + ('-'+args.build_label if args.build_label else ''))
     build.mkdir(parents=True, exist_ok=True)
     (ROOT/"build_ps4/toolchain.json").write_text(json.dumps({"llvm_bin":str(clang.parent)}),encoding="utf-8")
     run([sys.executable, ROOT / "scripts/ps4/generate_smoke.py"])
@@ -234,11 +262,43 @@ def main():
         flags += ["-DSP_GAME_LINKED"]
         if args.private_game_package: flags += ["-DSP_GAME_APP0"]
         sources.append(metadata)
-        for i,source in enumerate(local_sources):
+        sdk_source_set=set()
+        if args.sdk_generated:
+            sdk_build=build/'sdk'; sdk_build.mkdir(exist_ok=True)
+            sdk_sources,sdk_metadata=stage(args.sdk_generated,args.game_sdk_image,sdk_build,module='sdk')
+            local_sources.extend(sdk_sources); sdk_source_set=set(sdk_sources)
+            sources.append(sdk_metadata)
+        generated_flags=[*flags,*target_flags,'-O'+args.game_opt,'-g0',"-Wno-unused-label","-include",ROOT / "runtime/platform/guest_bridge.h"]
+        # Compile only changed translation units. Header/flag/compiler identity
+        # is included; outputs from a different lift can never silently reuse
+        # an object merely because its numeric index happens to match.
+        shared=hashlib.sha256(repr([str(clang),clang.stat().st_mtime_ns,*map(str,generated_flags)]).encode())
+        for header in sorted((ROOT/'runtime').glob('*.h')):
+            shared.update(header.read_bytes())
+        for header in sorted((ROOT/'runtime/platform').glob('*.h')):
+            shared.update(header.read_bytes())
+        for header in sorted((build/'local-generated').glob('*.h')):
+            shared.update(header.read_bytes())
+        seed=shared.digest()
+        def compile_generated(item):
+            i,source=item
             obj=build / ("game_%04d.o"%i)
-            run([clang,*flags,*target_flags,"-Wno-unused-label","-include",ROOT / "runtime/platform/guest_bridge.h",
-                 "-c",source,"-o",obj],timeout=300)
-            local_objects.append(obj)
+            role=b'sdk-host-import' if source in sdk_source_set else b''
+            extra_headers=b''
+            if source in sdk_source_set:
+                extra_headers=b''.join(p.read_bytes() for p in sorted(source.parent.glob('*.h')))
+            signature=hashlib.sha256(seed+role+extra_headers+str(source).encode()+source.read_bytes()).hexdigest()
+            stamp=obj.with_suffix('.sha256')
+            if not obj.is_file() or not stamp.is_file() or stamp.read_text()!=signature:
+                run([clang,*generated_flags,*(['-Dhost_import=sp_sdk_host_import'] if source in sdk_source_set else []),"-c",source,"-o",obj],timeout=300)
+                stamp.write_text(signature)
+            return obj
+        pool=ThreadPoolExecutor(max_workers=args.jobs)
+        try:
+            local_objects=list(pool.map(compile_generated,enumerate(local_sources)))
+        finally:
+            pool.shutdown(wait=True,cancel_futures=True)
+        if args.sdk_generated: flags += ['-DSP_SDK_LINKED']
     smoke_object = build / "smoke_generated.o"
     run([clang,*flags,*target_flags,"-Wno-unused-label","-include",ROOT / "runtime/platform/guest_bridge.h",
          "-c",ROOT / "build_ps4/smoke/smoke_generated.c","-o",smoke_object])
@@ -269,7 +329,8 @@ def main():
         raise RuntimeError("create-fself did not produce an eboot")
     print(f"ELF and FSELF built: {eboot}. Hardware behavior remains unverified.")
     if args.package:
-        package(sdk, build, eboot,args.game_image if args.private_game_package else None)
+        package(sdk, build, eboot,args.game_image if args.private_game_package else None,
+                args.game_sdk_image if args.private_game_package else None)
 
 
 if __name__ == "__main__":

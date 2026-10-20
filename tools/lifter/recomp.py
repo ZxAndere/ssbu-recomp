@@ -14,7 +14,7 @@ import sys
 import collections
 
 ELF = os.path.join(os.environ['RECOMP_BIN'], 'main.elf') if os.environ.get('RECOMP_BIN') else r'..\binaries\13.0.4\main.elf'   # RECOMP_BIN: scripts/setup.py
-BASE = 0x7100000000
+BASE = int(os.environ.get('RECOMP_BASE', '0x7100000000'), 0)
 FILE_OFF = 0x1000
 
 IMG = open(ELF, 'rb').read()
