@@ -13,8 +13,8 @@
   },
   "orbis_shader_compiler": {
     "orbis_elf_linked": true,
-    "sha256": "27e0cfe1996c098df3f3c1e87f1887a10bacd874b1cdd0fcfdbdc716077d7864",
-    "bytes": 59859080,
+    "sha256": "963327aea3b606e533c2a5b90234ab511d8eeb703b85bdb9791dc308b17f3214",
+    "bytes": 59857368,
     "shader_compiler_executed": false,
     "gpu_executed": false,
     "game_shaders_tested": false
@@ -54,7 +54,7 @@
   "real_game_shader_modules_created": 15,
   "real_game_shaders_converted_to_spirv": 15,
   "real_game_shaders_compiled_to_gcn": 15,
-  "gcn_compiler_warnings": 5,
+  "gcn_compiler_warnings": 0,
   "gcn_resource_binding_execution_verified": false,
   "gcn_shader_semantics_compared": false
 }
