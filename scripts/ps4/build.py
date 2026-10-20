@@ -195,7 +195,8 @@ def main():
     build.mkdir(parents=True, exist_ok=True)
     sources = [ROOT / "runtime/platform/common.c", ROOT / f"runtime/platform/{'ps4' if sdk else 'windows'}.c",
                ROOT / "runtime/platform/sync.c", ROOT / "runtime/platform/files.c",
-               ROOT / "platform/ps4/diagnostic.c", ROOT / "platform/ps4/services_test.c"]
+               ROOT / "runtime/platform/media.c", ROOT / "runtime/platform/ui.c", ROOT / "runtime/tex_decode.c",
+               ROOT / "platform/ps4/diagnostic.c", ROOT / "platform/ps4/services_test.c", ROOT / "platform/ps4/media_test.c"]
     flags = ["-std=c17", "-O1", "-g", "-Wall", "-Wextra", "-Werror",
              "-fno-strict-aliasing", "-I", str(ROOT / "runtime/platform"), "-I", str(ROOT / "runtime")]
     if not sdk:
@@ -204,7 +205,8 @@ def main():
         with tempfile.TemporaryDirectory(prefix="host-test-", dir=build) as scratch:
             run([exe, ROOT / "platform/ps4/fixture.txt", Path(scratch) / "io.bin"], timeout=30)
         return
-    sources.append(ROOT / "platform/ps4/main.c")
+    sources += [ROOT / "platform/ps4/main.c", ROOT / "runtime/platform/pad_ps4.c",
+                ROOT / "runtime/platform/audio_ps4.c", ROOT / "runtime/platform/video_ps4.c"]
     flags += ["--target=x86_64-pc-freebsd12-elf", "-fPIC", "-funwind-tables", "-DSSBU_PS4", "-D_POSIX_C_SOURCE=200809L",
               "-nostdlibinc", "-isystem", str(sdk / "include")]
     objects = []
@@ -214,7 +216,8 @@ def main():
         objects.append(obj)
     elf, oelf, eboot = build / "diagnostic.elf", build / "diagnostic.oelf", build / "eboot.bin"
     run([linker, "-m", "elf_x86_64", "-pie", "--script", sdk / "link.x", "--eh-frame-hdr",
-         "-L" + str(sdk / "lib"), sdk / "lib/crt1.o", *objects, "-lc", "-lkernel", "-o", elf])
+         "-L" + str(sdk / "lib"), sdk / "lib/crt1.o", *objects, "-lc", "-lkernel",
+         "-lScePad", "-lSceUserService", "-lSceAudioOut", "-lSceVideoOut", "-lSceSystemService", "-o", elf])
     verify_elf(elf)
     env = dict(os.environ, OO_PS4_TOOLCHAIN=str(sdk))
     run([fself, "-in", elf, "--out", oelf, "--eboot", eboot, "--paid", "0x3800000000000011"], env=env)

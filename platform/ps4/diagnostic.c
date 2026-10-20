@@ -6,6 +6,7 @@
 
 static unsigned checks, failures;
 int sp_services_test(const char *fixture, const char *scratch);
+int sp_media_test(void);
 #define CHECK(test) do { ++checks; if (!(test)) { ++failures; \
     sp_log("FAIL line %d: %s", __LINE__, #test); } } while (0)
 
@@ -127,6 +128,7 @@ int main(int argc, char **argv) {
     if (sp_init(NULL)) return 2;
     int result = sp_diagnostic(argv[1]);
     result |= sp_services_test(argv[1], argc > 2 ? argv[2] : NULL);
+    result |= sp_media_test();
     sp_shutdown();
     return result;
 }
