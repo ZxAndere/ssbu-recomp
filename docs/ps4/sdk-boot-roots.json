@@ -1,0 +1,28 @@
+{
+  "entry_symbol": "_ZNSt3__115recursive_mutexC1Ev",
+  "root_symbols": [
+    "_ZN2nn3mem17StandardAllocatorC1Ev",
+    "_ZNSt3__112__next_primeEm",
+    "_ZNSt3__15mutexD1Ev",
+    "_ZNSt3__15mutex4lockEv",
+    "_ZNSt3__15mutex8try_lockEv",
+    "_ZNSt3__15mutex6unlockEv",
+    "_ZNSt3__115recursive_mutexD1Ev",
+    "_ZNSt3__115recursive_mutex4lockEv",
+    "_ZNSt3__115recursive_mutex6unlockEv",
+    "_ZNSt3__115recursive_mutex8try_lockEv",
+    "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEEC1ERKS5_",
+    "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEEC1ERKS5_RKS4_",
+    "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEEC1ERKS5_mmRKS4_",
+    "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEED1Ev",
+    "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6assignEPKcm",
+    "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6assignEPKc",
+    "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendEmc",
+    "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE7reserveEm",
+    "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendEPKc",
+    "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendEPKcm",
+    "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6appendERKS5_mm",
+    "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6assignERKS5_mm",
+    "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6assignEmc"
+  ]
+}

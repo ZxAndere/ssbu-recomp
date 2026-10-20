@@ -1,14 +1,14 @@
 {
   "title_id": "SSBD00001",
   "content_id": "IV0000-SSBD00001_00-SSBUPLATFORMDIAG",
-  "package_sha256": "11b2fedff87c16b1c14a0511c523c10b82bd0ee862eedc5da94f38e225aaf61e",
+  "package_sha256": "14cdcd620dfd8950ffd4dc985baf531cbe732297c52a1f5c6d415be13eb575c1",
   "hardware_tested": false,
   "contains_game": false,
   "payload_readback_verified": true,
   "files": {
-    "eboot.bin": "338c2d2cb449a6796ed81dc7f2c310596929633483cb8abc73869c4f7866581c",
+    "eboot.bin": "2920492675f1e03123c195c369919fc0a2d2ad3d8951140955a50492dcd958a0",
     "fixture.txt": "4f51f9f6cde06893181cfeb9f3967b1a232a7a529a91cebe941771c0a6b80e39",
-    "smoke.elf": "e7e1b3a54bd29b6b2cb7d05d03cf38c9a05842a86597233f3aca18dfb935bfb7",
+    "smoke.elf": "6a625e83cbe96aaf0202311c6b70f94be09d5ce6ac8900020e5d5b1d6792821d",
     "NOTICE.txt": "168c7abb06cb813668958cfe322cfe1cf5f13018412720a6e19c870bae4c61e2",
     "licenses/project.txt": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
     "licenses/openorbis.txt": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",

@@ -1,0 +1,29 @@
+{
+  "host_process_exit": 1,
+  "guest_status": -6,
+  "unresolved_relocations": 0,
+  "constructors_entered": 306,
+  "constructors_completed": 306,
+  "constructor_completion_trace": true,
+  "nninit_startup_entered": true,
+  "application_lifecycle_initialized": true,
+  "nnmain_entered": true,
+  "stop": "_ZN2nn2oe20SetFocusHandlingModeENS0_17FocusHandlingModeE at 0x7103741fb0",
+  "hardware_tested": false,
+  "gameplay_verified": false,
+  "code_revision": "7428c1d",
+  "main_translated_functions": 112876,
+  "sdk_translated_functions": 67,
+  "target": "Windows native execution of private lifted game; PS4 execution unverified",
+  "all_imports_implemented": false,
+  "private_ps4_build": {
+    "linked": true,
+    "package_sha256": "27b0b29ca14321e8a1837fd3a63a5deb3b413b5744c06ce17f2ddbce415caee8",
+    "package_bytes": 1025048576,
+    "payload_readback_verified": true,
+    "contains_game": true,
+    "main_c_files_recompiled": 0,
+    "sdk_c_files_recompiled": 5,
+    "hardware_tested": false
+  }
+}

@@ -1,72 +1,92 @@
-# Progreso PS4 — bootstrap v0.2.0
+# Progreso PS4 — entrada real en nnMain
 
-Continuación de `ac2ee45` en `ps4/platform-diagnostic`. El objetivo de ejecutar Smash en PS4 sigue abierto.
-Esta entrega incorpora servicios, dispositivos, carga ELF y ejecución de C producido por el lifter original.
-**No hay partidas de Smash ejecutándose ni pruebas realizadas en una PS4 física.**
+Continuación de `ac2ee45`, rama `ps4/platform-diagnostic`, conservando los objetos compilados y los avances anteriores.
+**En PC se completaron los 306 constructores y se entró en nnMain. Smash no se ha ejecutado en una PS4 física.**
 
-## Código implementado
+## Arranque real comprobado
 
-| Componente | Implementación | Evidencia |
-|---|---|---|
-| Plataforma | Memoria y permisos, archivos con offset de 64 bits, hilos, mutex, condiciones, eventos, semáforos, TLS y módulos | Windows probado; Orbis compilado |
-| Fibras | Resume/yield, pilas protegidas en Orbis, 16 slots locales por fibra y afinidad al hilo creador | 17 checks Windows; instrucciones SysV reales ejecutadas en Unicorn x86-64, comprobando GPR/RSP/MXCSR/x87 |
-| DualShock 4 | sceUserService/scePad, cuatro usuarios, reconexión, botones Nintendo, zona muerta radial y vibración | Decodificador sintético probado; backend Orbis compilado |
-| Audio | Cola PCM estéreo acotada, worker AudioOut a 48 kHz, bloques de 256 frames, silencio y contadores | FIFO/wrap/overflow/silencio probados; salida física pendiente |
-| Pantalla | Dos framebuffers CPU lineales mediante sceVideoOut, texto propio y estado del arranque | Canarios de memoria en PC; backend compilado |
-| Gráficos upstream | runtime/tex_decode.c integrado sin modificar | BC1 sintético comprobado; no equivale a renderizado 3D del juego |
-| Memoria guest | RECOMP_ACCESS opcional en runtime.h/neon.h; imagen y pila traducidas a asignaciones host | Accesos, permisos y fallos comprobados; Windows mantiene acceso directo por defecto |
-| Cargador | ELF64 AArch64, segmentos/BSS, límites/solapamientos, dynamic y relocaciones RELATIVE/ABS64/GLOB_DAT/JUMP_SLOT | Entradas válidas y malformadas probadas en PC |
-| Recompilación | recomp.py original traduce cinco funciones ARM64 propias a C x86-64 | 1.000 comparaciones contra Unicorn ARM64 y enlace ELF/FSELF PS4 |
-| Ejecución parcial | Tabla estática, entrada configurable, fingerprint, errores recuperables y presupuesto de instrucciones | Incluye bucle infinito, SVC, acceso inválido y tabla incorrecta |
-| Pipeline privado | lift.py, manifiesto SHA-256 de imagen/fuentes, staging y response files | Fuentes/imagen cambiadas rechazadas; fixture enlazada en ambos destinos; entrada PC devolvió 1234 |
+| Etapa | Resultado observado en PC |
+|---|---|
+| ExeFS propio | main/sdk extraídos localmente; los seis hashes de segmentos NSO son correctos |
+| Main recompilado | 112.876 funciones reales, 1.162 fuentes C, ejecutable Windows completo enlazado |
+| SDK adicional | 67 funciones reales: allocator, mutex/recursive_mutex, std::string y __next_prime |
+| Enlazado guest | Imágenes separadas main/sdk, datos y RTTI reales, relocaciones sin entradas pendientes |
+| nninitStartup | Ejecutado y retornado |
+| Constructores | 306 entrados y 306 retornados, registrados individualmente después de cada llamada |
+| nnMain | Entrado; inicializado el recurso nativo de ciclo de vida de aplicación |
+| Parada actual | nn::oe::SetFocusHandlingMode, LR 0x7103741fb0, modo solicitado 2 |
 
-El ejecutor guest admite un contexto activo a la vez. Faltan el unwinder C++, migración de fibras,
-handlers guest del SDK y la conexión completa de los dispositivos al juego. El adaptador implementa
-la interfaz principal nnpad; motion y remapeo del menú original quedan pendientes.
+La secuencia comprobada avanzó de 62 a 65, 105, 168, 245, 292 y finalmente 306 constructores completados.
+El informe reproducible está en [private-boot-summary.json](docs/ps4/private-boot-summary.json).
+Los logs completos, imágenes, fuentes generadas y ejecutables permanecen exclusivamente en build_ps4/.
+Cero relocaciones pendientes **no significa que todos los imports tengan implementación**: los imports fuertes
+sin puente reciben thunks que detienen la ejecución cuando se usan. Los símbolos débiles sin definición
+real en un módulo quedan a cero, incluidos los hooks opcionales de nu y glslc.
 
-## Pruebas ejecutadas
+## Cambios técnicos de esta continuación
 
-`scripts/ps4/verify.py` completó:
+- std::recursive_mutex y std::mutex usan sus implementaciones SDK recompiladas, enlazadas con mutex nativos.
+  Se respetan recursión, try-lock, desbloqueo, destrucción y representación estática del SDK de 32 bytes.
+  El ejecutor sigue limitado a un contexto guest activo: no hay prueba de contención entre hilos guest.
+- Compatibilidad pthread para atributos y mutex normales/recursivos, inicializadores estáticos,
+  EBUSY/EPERM/EINVAL/EAGAIN guest y sincronización del contador/propietario en memoria guest.
+- Cadenas C con comprobación de límites; conversiones enteras LP64 con endptr, overflow y errno en TLS.
+  wmemcpy y otras operaciones anchas usan elementos guest de 32 bits, independientemente del wchar_t Windows.
+- Relojes realtime/monotónico, gettimeofday/time, TLS del hilo principal y ThreadType de 0x1c0 bytes;
+  identidad lógica, nombre, prioridad, núcleo lógico cero e información de pila verificadas en PC.
+- Reservas virtuales de hasta 64 GiB sin comprometerlas físicamente. El juego reservó 62 GiB y continuó.
+  Las direcciones lógicas permanecen bajo 39 bits y no se solapan con los módulos. Se conserva el límite
+  agregado de 512 MiB de páginas físicas y los permisos guest de 4 KiB sobre páginas Orbis de 16 KiB.
+- Cruces entre exports SDK y puentes host, fingerprint del SDK y metadatos main/sdk con nombres de objeto
+  distintos. La colisión local_game_program.o del enlace Orbis quedó corregida y comprobada mediante enlace.
+- El lifter ya no incorpora funciones SDK contiguas por un fallthrough imposible después de una instrucción
+  que siempre atrapa. Los main generados anteriores y sus objetos se conservaron sin regenerarlos.
+- nn::oe::Initialize crea y posee un evento nativo y libera sus recursos al finalizar/parar. Los perfiles
+  Nintendo solicitados se registran como hints; no se aplican frecuencias Tegra ni se cambian relojes nativos.
+  Notificaciones, foco y política de energía siguen pendientes de adaptación completa.
 
-- **378 checks C**: plataforma 52, servicios 49, medios 47, fibras 17, recompilación 213.
-- **14 pruebas Python**, sin omisiones, incluyendo **1.000 casos ARM64** comparados con ejecución nativa.
-- Verificación del cambio de contexto SysV real mediante Unicorn x86-64.
-- Prueba upstream rb_test: todos los casos pasaron; es una simulación de juguete, no online de Smash.
-- Compilación Orbis de rb_test.c, rb_input.c, rb_wire.c y rb_timesync.c.
-- ELF/FSELF y PKG público generados, hashes/firmas validados y payload extraído/comparado.
-- Variante estática local compilada para Windows/PS4, usando exclusivamente código de prueba propio.
+La capa de plataforma conserva archivos de 64 bits, módulos, sync/TLS/eventos/semáforos, hilos nativos y
+fibras con pila protegida. Hay adaptadores DualShock 4, PCM AudioOut y dos framebuffers CPU con texto propio.
+Están compilados para Orbis y comprobados con pruebas sintéticas; no equivalen a HID/audio/NVN del juego integrados.
+El bootstrap usa la pila guest de 1 MiB solicitada por este NPDM y una pila nativa independiente de 16 MiB.
+Las funciones C muy grandes se dividen en helpers de 256 instrucciones; el presupuesto cuenta checkpoints,
+no instrucciones ni FPS. El código completo se compiló a -O0 para esta prueba de arranque, no de rendimiento.
+
+## Pruebas disponibles completadas
+
+- **476 comprobaciones C**: plataforma 52, servicios 49, medios 47, fibras 21 y recompiler/runtime 307.
+- **31 pruebas Python**, sin omisiones. Incluyen 1.000 casos contra Unicorn ARM64 y 1.000 comparaciones
+  de estado nativo entre C dividido y sin dividir, además del cambio de contexto SysV en Unicorn x86-64.
+- Modelo Windows de páginas Orbis: permisos parciales, canarios, cero al recomprometer y reserva de 62 GiB
+  con solo una página host de 16 KiB comprometida al final del rango.
+- rb_test upstream: 211 rollbacks, 512 frames resimulados, profundidad máxima 6; todos pasaron.
+  Es una simulación de prueba, no rollback ni partidas de Smash verificadas.
+- Compilación de los cuatro módulos de esa prueba para Orbis; enlace ELF/FSELF y empaquetado de fixtures
+  propias; firmas/digests y payload extraído comparados. Variante estática propia enlazada en Windows/Orbis.
 
 Evidencia: [verification.json](docs/ps4/verification.json), [salidas](docs/ps4/host-results.txt),
-[manifiesto](docs/ps4/package-manifest.json), [validación PKG](docs/ps4/package-validation.txt).
-Los GUEST STOP de SVC, dirección inválida y presupuesto agotado son pruebas negativas esperadas.
-No se ejecutaron las pruebas de batalla/vídeo ni el diferencial sobre Smash por faltar el dump descifrado.
+[manifiesto público](docs/ps4/package-manifest.json), [validación](docs/ps4/package-validation.txt).
+Las paradas de SVC, dirección inválida, presupuesto y free inválido son pruebas negativas esperadas.
+El arranque real retorna una parada controlada de import pendiente, no un resultado de gameplay correcto.
 
-## Comportamiento del PKG
+## Paquete experimental y pendientes
 
-**SSBU Runtime Bootstrap**, Title ID `SSBD00001`, APP_VER `1.01`.
-Ejecuta las pruebas y el código ARM64 propio recompilado. Intenta cargar `/data/ssbu/main.elf`;
-si falta, lo registra. Si no se enlazó su tabla nativa, informa la dependencia. Nunca ejecuta ARM64 directamente.
+El paquete privado de arranque se generó en build_ps4/ps4-private-full/ con el main completo y las 67 funciones
+SDK. Tamaño: 1.025.048.576 bytes; SHA-256: 27b0b29ca14321e8a1837fd3a63a5deb3b413b5744c06ce17f2ddbce415caee8.
+ELF/FSELF, firmas/digests y payload extraído fueron validados. Se reutilizaron todos los objetos del main;
+solo se recompilaron cinco fuentes SDK. Contiene material derivado del juego y **no se publica**.
+El paquete público SSBU Runtime Bootstrap, SSBD00001, APP_VER 1.01 contiene exclusivamente pruebas propias,
+licencias y materiales homebrew OpenOrbis. El release/tag v0.1.0 se conserva.
 
-Inicializa vídeo, controles y audio y muestra el estado. Cross solicita un tono corto; Options libera
-los dispositivos y deja el proceso en espera. Todo ello está escrito/compilado y pendiente de verificación física.
-El log se anexa a `/data/ssbu-ps4-diagnostic.log`. También puede cerrarse desde el menú PS.
+El siguiente punto de software es adaptar foco/notificaciones de nn::oe, después continuar los imports
+observados en nnMain. No se presenta este import pendiente como un bloqueo que obligue a probar hardware.
+Quedan unwinder/excepciones C++, múltiples contextos guest, módulos NRO, RomFS y puentes completos nn::fs,
+HID/audio y NVN. El renderer upstream requiere Vulkan 1.3; el framebuffer CPU no dibuja escenas de Smash.
 
-El paquete público contiene código y fixtures propios, licencias y materiales homebrew OpenOrbis.
-Las compilaciones con código local se separan en `build_ps4/*-private/` y no se publican automáticamente.
+CRT/ABI, reservas virtuales grandes, permisos, flips, audio, mandos y comportamiento 13.52/GoldHEN requieren
+validación física. La prueba concreta está preparada en [hardware-probe.md](docs/ps4/hardware-probe.md).
+No hay mediciones de FPS ni compatibilidad física confirmada. Las claves, ExeFS, respaldos y código generado
+no se suben a GitHub; el checkout original permanece intacto.
 
-## Bloqueos concretos del juego
-
-1. **Entrada ausente:** no se encontró main.elf, ExeFS main/sdk ni prod.keys en las rutas examinadas de
-   C:\SmashUltimatePS4 y ubicaciones habituales. Los NSZ no se modificaron. Hace falta el ejecutable
-   descifrado para generar/comprobar funciones, tablas e imports reales; esto permite seguir en PC sin probar consola.
-2. **Runtime parcial:** se adaptan accesos del lifter y cinco imports libc. Faltan handlers guest del SDK,
-   excepciones/landing pads, heaps, contextos múltiples, NRO y puentes nn::fs/hid/audio/NVN. Los servicios
-   de plataforma implementados son la base de esos puentes, que todavía no están todos conectados.
-3. **GPU:** hay framebuffer CPU. El renderer upstream exige Vulkan 1.3, colas gráficas/compute y shaders.
-   No hay RADV Orbis instalado/validado. Piglet requiere módulos y shaders con otra interfaz y no reemplaza NVN automáticamente.
-4. **Hardware:** CRT, ABI, permisos, flips, sonido, mandos y cierre 13.52/GoldHEN siguen sin verificar.
-
-Commits publicados: f86036c (servicios), dbdb855 (dispositivos), 127d003 (bootstrap/fibras),
-f9a8a30 (manifiestos/validación). v0.1.0 sigue conservada en su tag/release.
-El checkout original permanece limpio en main. No se publicaron claves, respaldos, saves ni código derivado del juego.
-No existen mediciones de FPS del juego ni una declaración de port terminado.
+Referencia pública para tamaño ThreadType: [nnsdk-rs](https://github.com/ultimate-research/nnsdk-rs/blob/master/src/nn/os.rs).
+Los offsets usados se contrastaron con accesores del SDK local; no se publicó su código.

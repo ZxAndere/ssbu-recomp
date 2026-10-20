@@ -4547,6 +4547,10 @@ runtime/platform/files.c	10	Filesystem	_fseeki64	return _fseeki64(file, (int64_t
 runtime/platform/files.c	28	Win32	_WIN32	#ifdef _WIN32
 runtime/platform/files.c	29	Filesystem	_fseeki64	int rc = _fseeki64(file->native, 0, SEEK_END) ? SP_IO : SP_OK;
 runtime/platform/files.c	30	Filesystem	_ftelli64	int64_t value = _ftelli64(file->native);
+runtime/platform/virtual_memory.c	8	Win32	windows.h	#include <windows.h>
+runtime/platform/virtual_memory.c	41	Memory	MEM_RESERVE, PAGE_NOACCESS, VirtualAlloc	pointer=VirtualAlloc(NULL,rounded,MEM_RESERVE,PAGE_NOACCESS);
+runtime/platform/virtual_memory.c	52	Memory	MEM_COMMIT, PAGE_READWRITE, VirtualAlloc	return VirtualAlloc(pointer,page,MEM_COMMIT,PAGE_READWRITE)==pointer ? SP_OK : SP_SYSTEM;
+runtime/platform/virtual_memory.c	66	Memory	VirtualFree	return VirtualFree(pointer,page,MEM_DECOMMIT) ? SP_OK : SP_SYSTEM;
 runtime/platform/windows.c	2	Win32	windows.h	#include <windows.h>
 runtime/platform/windows.c	6	Win32	HANDLE	struct SpThread { HANDLE handle; SpThreadFn fn; void *argument; };
 runtime/platform/windows.c	7	Threads/sync	CRITICAL_SECTION	struct SpMutex { CRITICAL_SECTION native; };
@@ -4989,10 +4993,12 @@ scripts/ps4/audit.py	24	Audio	HWAVEOUT, WAVEFORMATEX, WAVEHDR, opus.*\.dll, wave
 scripts/ps4/audit.py	25	Network	InetPton, SOCKET, WSA, WinHttp, closesocket, ioctlsocket, winsock, ws2_32	"""Network"": r""winsock\w*|ws2_32|\b(?:WSA\w*|SOCKET|closesocket|ioctlsocket|WinHttp\w*|InetPton\w*)\b"","
 scripts/ps4/audit.py	26	Windows build/tools	.bat, MSVC, Visual Studio, Windows SDK, powershell, vswhere, winreg	"""Windows build/tools"": r""clang\.exe|link\.exe|vswhere|MSVC|Visual Studio|Windows SDK|\.bat\b|powershell|winreg|os\.name\s*==\s*['\""]nt|sys\.platform.*win32"","
 scripts/ps4/audit.py	30	Windows build/tools	.bat	"TEXT_EXTENSIONS = {"".c"", "".cpp"", "".h"", "".inc"", "".py"", "".ps1"", "".bat"", "".sh"", "".md"", "".def"", "".json"", "".ini"", "".txt""}"
-scripts/ps4/build.py	36	Windows build/tools	"os.name == ""nt"	"path = Path(directory) / (name + ("".exe"" if os.name == ""nt"" else """"))"
-scripts/ps4/build.py	58	Windows build/tools	"os.name == ""nt"	"suffix = "".exe"" if os.name == ""nt"" else """""
-scripts/ps4/build.py	92	Windows build/tools	"os.name == ""nt"	"host = ""windows"" if os.name == ""nt"" else (""macos"" if sys.platform == ""darwin"" else ""linux"")"
-scripts/ps4/build.py	93	Windows build/tools	"os.name == ""nt"	"tool = sdk / ""bin"" / host / (""PkgTool.Core.exe"" if os.name == ""nt"" else ""PkgTool.Core"")"
+scripts/ps4/build.py	33	Windows build/tools	clang.exe	# llvm-mingw's clang.exe is a launcher. Killing only that PID leaves
+scripts/ps4/build.py	35	Windows build/tools	os.name=='nt	if os.name=='nt':
+scripts/ps4/build.py	52	Windows build/tools	"os.name == ""nt"	"path = Path(directory) / (name + ("".exe"" if os.name == ""nt"" else """"))"
+scripts/ps4/build.py	74	Windows build/tools	"os.name == ""nt"	"suffix = "".exe"" if os.name == ""nt"" else """""
+scripts/ps4/build.py	108	Windows build/tools	"os.name == ""nt"	"host = ""windows"" if os.name == ""nt"" else (""macos"" if sys.platform == ""darwin"" else ""linux"")"
+scripts/ps4/build.py	109	Windows build/tools	"os.name == ""nt"	"tool = sdk / ""bin"" / host / (""PkgTool.Core.exe"" if os.name == ""nt"" else ""PkgTool.Core"")"
 scripts/ps4/verify.py	46	Windows build/tools	clang.exe	clang=args.llvm_bin/'clang.exe'
 scripts/run.py	29	Windows build/tools	.bat	"ap.add_argument('--play', action='store_true', help='what ""Play SSBU.bat"" does: the saves in <build>\\saves, until you quit; '"
 scripts/run.py	44	Windows build/tools	.bat	"print('The game is not built yet (looked in %s): double-click ""Install SSBU.bat"" first.' % a.build)"
@@ -5211,6 +5217,9 @@ tests/prof15_report.py	47	Graphics	vk_	if o.startswith('nvn_vk') or o.startswith
 tests/prof15_report.py	57	DLL/ABI	ntdll	return 'ntdll / win32u (wait or system call)'
 tests/prof15_report.py	62	DLL/ABI	.dll	if m.endswith('.nro.dll') or 'nro' in m or m.startswith('lua2cpp') or m.startswith('common') or m.endswith('_src.dll'):
 tests/prof15_report.py	101	DLL/ABI	ntdll	"print('\n=== thread %d ""%s"" tid %s: CPU %.2f ms per frame (%.0f ms over %.0f frames); %d samples, %d with the innermost frame in ntdll / win32u (waiting or system call)'"
+tests/ps4/test_split.py	18	Windows build/tools	clang.exe	clang=Path(json.loads(config.read_text())['llvm_bin'])/'clang.exe'
+tests/ps4/test_virtual_memory.py	16	Windows build/tools	sys.platform!='win32	if not config.is_file() or sys.platform!='win32': self.skipTest('Windows host compiler required')
+tests/ps4/test_virtual_memory.py	17	Windows build/tools	clang.exe	clang=Path(json.loads(config.read_text())['llvm_bin'])/'clang.exe'
 tests/r1_nro_build.py	7	Windows build/tools	clang.exe	CLANG = os.environ.get('RECOMP_CLANG', r'C:\llvm-8.0.0\bin\clang.exe')
 tests/r1_nro_build.py	11	DLL/ABI	.dll	if n.endswith('.dll') and not os.path.exists(os.path.join(BIN, n)):
 tests/r1_nro_build.py	29	DLL/ABI	.dll	r = subprocess.run([CLANG, '-shared', '@' + rsp, '-o', os.path.join(BIN, name + '.dll')], capture_output=True, text=True)

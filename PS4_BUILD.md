@@ -24,7 +24,8 @@ $ps4Compiler = 'C:\SmashUltimatePS4\ps4-deps\llvm-mingw-20261006-ucrt-x86_64\bin
 $ps4Sdk = 'C:\SmashUltimatePS4\ps4-deps\OpenOrbis\PS4Toolchain'
 
 # En otra máquina: dependencias de emulación, sin instalación global.
-python -m pip install --target build_ps4/python-deps unicorn==2.1.4 capstone==5.0.9
+python -m pip install --target build_ps4/python-deps unicorn==2.1.4 capstone==5.0.9 lz4==4.4.5 zstandard==0.25.0 pycryptodome==4.1.0
+$env:PYTHONPATH = (Resolve-Path build_ps4/python-deps).Path
 python scripts/ps4/verify.py --llvm-bin $ps4Compiler --sdk $ps4Sdk
 ```
 
@@ -51,38 +52,61 @@ Orbis: x86_64-pc-freebsd12-elf, link.x, crt1.o, libc y stubs kernel/Pad/UserServ
 El cambio de contexto está en ensamblador SysV. Response files permiten enlazar más de mil objetos sin
 superar el límite de argumentos Windows. El empaquetado usa una lista fija; no recorre dumps.
 
-## Lift y enlace privados
+## Extracción, lift y enlace privados
 
-Hace falta un main.elf AArch64 propio ya descifrado/convertido. NSZ cifrado no sirve como sustituto.
-El input original no se modifica; se copia y genera dentro de build_ps4/, ignorado por Git.
+La actualización propia de esta sesión produjo main/sdk con los seis SHA-256 de segmentos correctos.
+El main coincide con el layout 13.0.5: texto 0x39c8440. Las claves solo se leen desde su ruta original.
+El lector selectivo atraviesa el NSZ sólido sin escribir RomFS ni un NSP expandido; admite NCZBLOCK.
+Cada salida debe ser una carpeta nueva dentro de build_ps4/, ignorada por Git.
 
 ```powershell
-python scripts/ps4/lift.py --image 'D:\dump-propio\main.elf' --out build_ps4/local-lift --mode full --jobs 2
-python scripts/ps4/build.py host --llvm-bin $ps4Compiler --game-generated build_ps4/local-lift/generated --game-image build_ps4/local-lift/inputs/main.elf --game-entry 0xDIRECCION_GUEST
-python scripts/ps4/build.py ps4 --llvm-bin $ps4Compiler --sdk $ps4Sdk --game-generated build_ps4/local-lift/generated --game-image build_ps4/local-lift/inputs/main.elf --game-entry 0xDIRECCION_GUEST
+$env:SSBU_PROD_KEYS = 'D:\claves-propias\prod.keys'
+$env:SSBU_TITLE_KEYS = 'D:\claves-propias\title.keys'
+python scripts/ps4/extract.py --update 'D:\respaldo-propio\update.nsz' --out build_ps4/my-exefs
+python scripts/ps4/lift.py --image build_ps4/my-exefs/main.elf --out build_ps4/my-full --jobs 2
+
+# Cierre SDK del arranque verificado: mutex, strings, allocator y next_prime.
+$bootRoots = Get-Content docs/ps4/sdk-boot-roots.json -Raw | ConvertFrom-Json
+$sdkLift = @('scripts/ps4/bootstrap_lift.py', '--image', 'build_ps4/my-exefs/sdk.elf', '--out', 'build_ps4/my-sdk', '--entry-symbol', $bootRoots.entry_symbol, '--base', '0x7200000000', '--cut-imports', 'build_ps4/my-full/generated/imports.c', '--max-functions', '2000')
+foreach ($sdkSymbol in $bootRoots.root_symbols) { $sdkLift += @('--root-symbol', $sdkSymbol) }
+python @sdkLift
+
+python scripts/ps4/build.py host --llvm-bin $ps4Compiler --game-generated build_ps4/my-full/generated --game-image build_ps4/my-exefs/main.elf --sdk-generated build_ps4/my-sdk/generated --game-sdk-image build_ps4/my-exefs/sdk.elf --game-opt 0 --jobs 2 --build-label full
+python scripts/ps4/build.py ps4 --llvm-bin $ps4Compiler --sdk $ps4Sdk --game-generated build_ps4/my-full/generated --game-image build_ps4/my-exefs/main.elf --sdk-generated build_ps4/my-sdk/generated --game-sdk-image build_ps4/my-exefs/sdk.elf --game-opt 0 --jobs 2 --build-label full --package --private-game-package
 ```
 
-0xDIRECCION_GUEST es un marcador: sustituir por una entrada identificada en el dump y presente
-entre las funciones recompiladas. No se inventa una entrada de Smash. Sin esa opción se usa la entrada ELF.
-El modo eh usa recomp_eh.py y necesita además integrar los hooks de excepciones/landing pads, pendientes.
+Para la variante acotada: bootstrap_lift.py --initializers --max-functions 4096 y --root para destinos
+indirectos observados. No sustituye un lift completo. El manifiesto SHA-256 vincula imagen y todas las
+fuentes; cambios/archivos adicionales se rechazan. Un fingerprint adicional comprueba las imágenes cargadas.
+--root-symbol resuelve cada nombre contra el ELF de entrada, sin fijar direcciones de otra versión.
+Para reanudar esta sesión, reutiliza game-full/generated, game-exefs2 y sdk-core7/generated ya existentes;
+no repitas extracción ni lift del main. El mismo --build-label full conserva la caché de los objetos.
 
-El manifiesto SHA-256 vincula imagen y fuentes al terminar el lift. El build rechaza inputs, fuentes o
-conjuntos de archivos cambiados. La comprobación FNV en ejecución evita cargar después otra imagen;
-no es una firma criptográfica. Las fuentes se compilan de nuevo para Orbis, sin reutilizar DLL/COFF Windows.
+Sin --game-entry se elige el export nninitStartup, seguido de DT_INIT_ARRAY y nnMain. El offset ELF cero
+es metadata MOD0 del NSO, no una entrada del proceso. main.npdm pide una pila guest de 1 MiB; el bootstrap
+usa ese tamaño y una fibra con pila nativa independiente de 16 MiB. main está en 0x7100000000 y SDK en
+0x7200000000 mediante traducción de direcciones, sin exigir mapas host a esas direcciones.
 
-Cada entrada guest tiene un límite de un millón de instrucciones traducidas. Checkpoints en labels
-cortan los bucles infinitos. Imports desconocidos, direcciones inválidas, SVC o funciones ausentes
-producen una parada registrada. Todavía faltan handlers y excepciones del runtime completo.
+Las funciones grandes se dividen en bloques de 256 instrucciones, con transiciones explícitas de PC.
+Los helpers conservan registros en Ctx; 1.000 casos comparan estado completo contra C sin dividir.
+El presupuesto de un millón cuenta checkpoints: entradas, saltos y puntos periódicos. No es una medición
+ni un límite exacto de instrucciones ARM. Imports desconocidos y accesos inválidos paran y se registran.
 
-La variante con fuentes locales va a build_ps4/host-private o ps4-private. Crear su PKG exige ambas
-opciones --package --private-game-package: incluye el ELF propio y marca contains_game: true.
-Esos resultados permanecen locales. Esta entrega publica únicamente la variante sin código del juego.
+El build usa objetos con caché de fuentes/headers/flags, concurrencia limitada, response files y cierre
+del árbol del compilador si vence el timeout. --game-opt 0 es una prueba de arranque, sin debug generado;
+no representa una compilación de rendimiento. El runtime común sigue con -O1 y sin fast-math.
+El modo eh necesita integrar los hooks de unwinding y landing pads, todavía pendientes.
+
+--private-game-package incluye main.elf/sdk.elf propios y marca contains_game: true. Esos PKG, fuentes,
+ELF y objetos permanecen en build_ps4/*-private*/. No se publican. El PKG público contiene pruebas propias.
+boot_probe.py captura la parada controlada y distingue constructores entrados/completados y nnMain;
+no convierte una salida controlada en una afirmación de gameplay.
 
 ## Ejecución Orbis pendiente
 
 El PKG ejecuta checks, busca /data/ssbu/main.elf y muestra el estado con vídeo/mandos/audio.
 Cross solicita un tono; Options libera dispositivos y deja el proceso en espera. Log:
-/data/ssbu-ps4-diagnostic.log y stdout. Un PKG privado busca su ELF en /app0/main.elf.
+/data/ssbu-ps4-diagnostic.log y stdout. Un PKG privado busca sus ELF en /app0/main.elf y /app0/sdk.elf.
 
 CRT, ABI, pantalla, sonido, mandos y cierre no se han verificado en hardware. La UI indica que
 Smash no está ejecutándose. El siguiente trabajo con datos propios se hará primero en PC;

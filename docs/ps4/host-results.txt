@@ -1,25 +1,47 @@
 RESULT: 52 checks, 0 failures
 SERVICES RESULT: 49 checks, 0 failures
 MEDIA RESULT: 47 checks, 0 failures
-FIBER RESULT: 17 checks, 0 failures
-RECOMP RESULT: 213 checks, 0 failures
+FIBER RESULT: 21 checks, 0 failures
+RECOMP RESULT: 307 checks, 0 failures
+test_controlled_stop_is_not_reported_as_gameplay (test_boot_probe.BootProbeTests.test_controlled_stop_is_not_reported_as_gameplay) ... ok
+test_crash_or_absent_result_is_rejected (test_boot_probe.BootProbeTests.test_crash_or_absent_result_is_rejected) ... ok
+test_explicit_completions_survive_stop_after_last_constructor (test_boot_probe.BootProbeTests.test_explicit_completions_survive_stop_after_last_constructor) ... ok
 test_sysv_context_preserves_registers_and_fp_control (test_context.ContextTests.test_sysv_context_preserves_registers_and_fp_control) ... ok
+test_blocks_cross_boundary_and_last_block (test_extract.NczTests.test_blocks_cross_boundary_and_last_block) ... ok
+test_ctr_unaligned_read (test_extract.NczTests.test_ctr_unaligned_read) ... ok
+test_invalid_and_truncated (test_extract.NczTests.test_invalid_and_truncated) ... ok
+test_solid_forward_overlap_and_rewind (test_extract.NczTests.test_solid_forward_overlap_and_rewind) ... ok
+test_uncompressed_block_and_exact_multiple (test_extract.NczTests.test_uncompressed_block_and_exact_multiple) ... ok
 test_changed_generated_source_is_rejected (test_link_game.LinkGameTests.test_changed_generated_source_is_rejected) ... ok
 test_changed_input_is_rejected (test_link_game.LinkGameTests.test_changed_input_is_rejected) ... ok
+test_checkpoints_bound_cycles_without_polling_dispatch_cases (test_link_game.LinkGameTests.test_checkpoints_bound_cycles_without_polling_dispatch_cases) ... ok
 test_extra_source_is_rejected (test_link_game.LinkGameTests.test_extra_source_is_rejected) ... ok
+test_native_metadata_object_names_do_not_collide (test_link_game.LinkGameTests.test_native_metadata_object_names_do_not_collide) ... ok
+test_sdk_table_namespace_is_separate (test_link_game.LinkGameTests.test_sdk_table_namespace_is_separate) ... ok
 test_stage_preserves_original_and_adds_checkpoints (test_link_game.LinkGameTests.test_stage_preserves_original_and_adds_checkpoints) ... ok
+test_bootstrap_resolves_symbol_roots_from_input_image (test_recomp.RecompilerTests.test_bootstrap_resolves_symbol_roots_from_input_image) ... ok
+test_initializer_array_bounds (test_recomp.RecompilerTests.test_initializer_array_bounds) ... ok
 test_invalid_headers_and_segments (test_recomp.RecompilerTests.test_invalid_headers_and_segments) ... ok
 test_lifted_c_matches_unicorn_arm64 (test_recomp.RecompilerTests.test_lifted_c_matches_unicorn_arm64) ... ok
+test_missing_weak_symbol_relocates_to_null (test_recomp.RecompilerTests.test_missing_weak_symbol_relocates_to_null) ... ok
 test_relocation_bounds_and_types (test_recomp.RecompilerTests.test_relocation_bounds_and_types) ... ok
+test_trapped_padding_does_not_schedule_next_sdk_function (test_recomp.RecompilerTests.test_trapped_padding_does_not_schedule_next_sdk_function) ... C:\SmashUltimatePS4\ssbu-recomp-ps4\tools\lifter\recomp.py:20: ResourceWarning: unclosed file <_io.BufferedReader name='C:\\SmashUltimatePS4\\ssbu-recomp-ps4\\build_ps4\\tmp03mc6ru2\\main.elf'>
+  IMG = open(ELF, 'rb').read()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
 test_valid_guest_elf (test_recomp.RecompilerTests.test_valid_guest_elf) ... ok
++ C:\SmashUltimatePS4\ps4-deps\llvm-mingw-20261006-ucrt-x86_64\bin\clang.exe -O0 -std=c17 -I C:\SmashUltimatePS4\ssbu-recomp-ps4\runtime -include C:\SmashUltimatePS4\ssbu-recomp-ps4\runtime\platform\guest_bridge.h C:\SmashUltimatePS4\ssbu-recomp-ps4\build_ps4\tmpuu9xjnhe\original.c C:\SmashUltimatePS4\ssbu-recomp-ps4\build_ps4\tmpuu9xjnhe\split.c C:\SmashUltimatePS4\ssbu-recomp-ps4\build_ps4\tmpuu9xjnhe\main.c -o C:\SmashUltimatePS4\ssbu-recomp-ps4\build_ps4\tmpuu9xjnhe\test.exe
+test_native_split_matches_unsplit_control_flow (test_split.SplitTests.test_native_split_matches_unsplit_control_flow) ... ok
 test_elf_machine_and_type (test_tools.ToolTests.test_elf_machine_and_type) ... ok
 test_incomplete_validator_output_is_rejected (test_tools.ToolTests.test_incomplete_validator_output_is_rejected) ... ok
 test_source_checkout_is_not_an_sdk (test_tools.ToolTests.test_source_checkout_is_not_an_sdk) ... ok
 test_truncated_and_coff_are_rejected (test_tools.ToolTests.test_truncated_and_coff_are_rejected) ... ok
 test_validator_exit_zero_does_not_hide_bad_hash (test_tools.ToolTests.test_validator_exit_zero_does_not_hide_bad_hash) ... ok
++ C:\SmashUltimatePS4\ps4-deps\llvm-mingw-20261006-ucrt-x86_64\bin\clang.exe -O1 -std=c17 -Wall -Wextra -Werror -I C:\SmashUltimatePS4\ssbu-recomp-ps4\runtime\platform C:\SmashUltimatePS4\ssbu-recomp-ps4\build_ps4\tmpgi1upjow\test.c C:\SmashUltimatePS4\ssbu-recomp-ps4\runtime\platform\windows.c -o C:\SmashUltimatePS4\ssbu-recomp-ps4\build_ps4\tmpgi1upjow\test.exe
+test_partial_pages_permissions_and_zero_fill (test_virtual_memory.VirtualMemoryTests.test_partial_pages_permissions_and_zero_fill) ... ok
 
 ----------------------------------------------------------------------
-Ran 14 tests in 0.756s
+Ran 31 tests in 6.800s
 
 OK
 rb_test: 211 rollbacks, 512 frames simulated again, deepest 6 frames; all passed

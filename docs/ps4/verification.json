@@ -3,16 +3,16 @@
   "hardware_tested": false,
   "gameplay_running": false,
   "unicorn_arm64_cases": 1000,
-  "package_sha256": "11b2fedff87c16b1c14a0511c523c10b82bd0ee862eedc5da94f38e225aaf61e",
+  "package_sha256": "14cdcd620dfd8950ffd4dc985baf531cbe732297c52a1f5c6d415be13eb575c1",
   "checks": {
     "host": {
       "exit_code": 0,
       "checks": {
+        "platform": 52,
         "SERVICES": 49,
         "MEDIA": 47,
-        "FIBER": 17,
-        "RECOMP": 213,
-        "platform": 52
+        "FIBER": 21,
+        "RECOMP": 307
       }
     },
     "orbis_package": {
@@ -20,7 +20,7 @@
     },
     "python_tests": {
       "exit_code": 0,
-      "tests": 14,
+      "tests": 31,
       "skipped": false
     },
     "static_link_host": {
@@ -48,5 +48,6 @@
     "orbis_compile_rb_timesync": {
       "exit_code": 0
     }
-  }
+  },
+  "code_revision": "7428c1d"
 }

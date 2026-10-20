@@ -9,8 +9,8 @@ Después de `ac2ee45` se implementaron sync/TLS/módulos/archivos, fibras, DualS
 framebuffer CPU, carga ELF/relocaciones, traducción guest→host y enlace estático de C generado.
 La evidencia actual está en [PS4_PROGRESS.md](PS4_PROGRESS.md). La tabla siguiente conserva el
 análisis de la base Windows; sus pendientes iniciales deben leerse junto al estado actualizado.
-Los dispositivos están compilados, pendientes de prueba física. El código recompilado ejecutado
-hasta ahora proviene de cinco funciones ARM64 propias, sin código del juego.
+Los dispositivos están compilados, pendientes de prueba física. Además de las cinco funciones propias, se extrajo el ExeFS local, se generó el main completo y se
+completaron los 306 constructores y se entró en nnMain en PC con funciones SDK reales. Véase el progreso actualizado.
 
 ## Alcance y método
 
@@ -25,7 +25,8 @@ Busca expresamente `windows.h`, `LoadLibrary`, `GetProcAddress`, `VirtualAlloc`,
 `QueryPerformanceCounter`, `SDL_` y `vkCreateInstance`, además de familias de memoria, sincronización,
 archivos, red, audio, COM y compilación. Los resultados incluyen comentarios y ramas condicionales;
 son candidatos de revisión, no un grafo de llamadas ni una prueba de alcanzabilidad.
-No se examinaron claves, firmware ni contenidos del respaldo NSZ.
+La auditoría textual inicial no examinó claves ni respaldos. Después se usaron las claves locales indicadas
+por el usuario para extraer ExeFS del NSZ; no se copiaron ni publicaron claves o respaldos.
 
 ## Hallazgos principales
 
