@@ -930,13 +930,16 @@ def lift_function(env, entry):
         out.append('  uint64_t jt = 0;')
     for pc, stmt in lines:
         out.append('L_%x: %s' % (pc, stmt))
-    out.append('  f_%x(c); return;' % end if end < BASE + TEXT_SIZE and not lines[-1][1].startswith(('return;', 'goto', '{ jt', '{ f_', '{ imp_', '{ h_')) else '  return;')
+    # A trapped instruction never returns. Padding UDFs after RET/tail calls
+    # must not pull every adjacent SDK export into a bounded call closure.
+    falls_through = bool(lines) and not lines[-1][1].startswith(('return;', 'goto', '{ jt', '{ f_', '{ imp_', '{ h_', 'guest_unimpl(', 'guest_trap('))
+    out.append('  f_%x(c); return;' % end if end < BASE + TEXT_SIZE and falls_through else '  return;')
     if fn.has_br:
         out.append('L_dispatch: switch (jt) {')
         out.extend('  case 0x%xULL: goto L_%x;' % (pc, pc) for pc, _ in lines)
         out.append('  default: call_indirect(c, jt); return; }')
     out.append('}')
-    if lines and not lines[-1][1].startswith(('return;', 'goto', '{ jt', '{ f_', '{ imp_', '{ h_')) and end < BASE + TEXT_SIZE:
+    if falls_through and end < BASE + TEXT_SIZE:
         env.wanted.setdefault(end, None)
     return '\n'.join(out), len(lines), bad
 

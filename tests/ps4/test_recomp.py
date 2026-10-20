@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT/'build_ps4/python-deps'))
@@ -16,6 +17,28 @@ IMAGE=ROOT/'build_ps4/smoke/main.elf'
 
 @unittest.skipUnless(EXE.is_file() and IMAGE.is_file(),'build the host target first')
 class RecompilerTests(unittest.TestCase):
+    def test_bootstrap_resolves_symbol_roots_from_input_image(self):
+        with tempfile.TemporaryDirectory(dir=ROOT/'build_ps4') as folder:
+            output=Path(folder)/'lift'
+            command=[sys.executable,str(ROOT/'scripts/ps4/bootstrap_lift.py'),'--image',str(IMAGE),
+                     '--out',str(output),'--entry','0x7100000044','--root-symbol','probe','--max-functions','16']
+            subprocess.run(command,check=True,capture_output=True,timeout=20)
+            table=(output/'generated/table.c').read_text()
+            self.assertIn('fn_table_count=1',table)
+            self.assertIn('f_7100000044',table)
+    def test_trapped_padding_does_not_schedule_next_sdk_function(self):
+        sys.path.insert(0,str(ROOT/'scripts/ps4'))
+        from generate_smoke import fixture
+        with tempfile.TemporaryDirectory(dir=ROOT/'build_ps4') as folder:
+            data=bytearray(fixture()[0]); struct.pack_into('<II',data,0x1044,0xd65f03c0,0)
+            (Path(folder)/'main.elf').write_bytes(data)
+            with patch.dict('os.environ',{'RECOMP_BIN':folder,'RECOMP_BASE':'0x7100000000'}):
+                spec=importlib.util.spec_from_file_location('padding_recomp',ROOT/'tools/lifter/recomp.py')
+                recomp=importlib.util.module_from_spec(spec); spec.loader.exec_module(recomp)
+            env=recomp.Env(); env.starts=[0x7100000044,0x710000004c]; env.imports=set()
+            source,_,_=recomp.lift_function(env,0x7100000044)
+            self.assertNotIn(0x710000004c,env.wanted)
+            self.assertNotIn('f_710000004c(c);',source)
     def inspect(self,data):
         with tempfile.TemporaryDirectory(dir=ROOT/'build_ps4') as folder:
             image=Path(folder)/'input.elf'
@@ -41,6 +64,13 @@ class RecompilerTests(unittest.TestCase):
         for offset,value in [(0x2240,0x20),(0x2240,1<<40),(0x2248,0x999),(0x2250,1<<40)]:
             data=bytearray(original);struct.pack_into('<Q',data,offset,value)
             with self.subTest(offset=offset,value=value): self.assertEqual(self.inspect(data),1)
+
+    def test_missing_weak_symbol_relocates_to_null(self):
+        for binding,expected in [(2,0),(1,1)]:
+            data=bytearray(IMAGE.read_bytes())
+            data[0x2204]=(binding<<4)|2; struct.pack_into('<H',data,0x2206,0)
+            struct.pack_into('<QQ',data,0x2248,(1<<32)|0x101,0)
+            with self.subTest(binding=binding): self.assertEqual(self.inspect(data),expected)
 
     def test_initializer_array_bounds(self):
         original=IMAGE.read_bytes()

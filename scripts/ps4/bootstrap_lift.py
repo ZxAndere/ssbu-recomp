@@ -25,6 +25,7 @@ def main():
     parser.add_argument('--max-functions', type=int, default=2000)
     parser.add_argument('--initializers', action='store_true', help='Also seed static constructors and nnMain from this image')
     parser.add_argument('--root', action='append', type=lambda text:int(text,0), default=[], help='Additional observed indirect-call target (repeatable)')
+    parser.add_argument('--root-symbol', action='append', default=[], help='Additional exported function name, resolved from this image (repeatable)')
     args = parser.parse_args()
     out, allowed = args.out.resolve(), (ROOT/'build_ps4').resolve()
     if out == allowed or not out.is_relative_to(allowed) or out.exists():
@@ -39,15 +40,19 @@ def main():
     os.environ['RECOMP_BASE'] = hex(args.base)
     spec = importlib.util.spec_from_file_location('bootstrap_recomp', ROOT/'tools/lifter/recomp.py')
     recomp = importlib.util.module_from_spec(spec); spec.loader.exec_module(recomp)
-    if args.entry is None:
+    exported={}
+    if args.entry is None or args.root_symbol:
         for i in range((recomp.STRTAB-recomp.SYMTAB)//24):
             name, _, _, section, value, _ = struct.unpack_from('<IBBHQQ', recomp.IMG, recomp.FILE_OFF+recomp.SYMTAB+i*24)
             start = recomp.FILE_OFF+recomp.STRTAB+name
-            if section and recomp.IMG[start:recomp.IMG.index(b'\0',start)].decode('latin-1') == args.entry_symbol:
-                args.entry = recomp.BASE+value
-                break
+            if section: exported[recomp.IMG[start:recomp.IMG.index(b'\0',start)].decode('latin-1')]=recomp.BASE+value
+    if args.entry is None:
+        args.entry=exported.get(args.entry_symbol)
         if args.entry is None:
             parser.error('Entry symbol is not defined in this module')
+    for symbol in args.root_symbol:
+        if symbol not in exported: parser.error('Root symbol is not defined in this module: '+symbol)
+        args.root.append(exported[symbol])
     env = recomp.Env(); env.full = True; env.imports = set()
     if args.cut_imports:
         import re
