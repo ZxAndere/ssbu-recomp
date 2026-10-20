@@ -18,3 +18,8 @@ class BootProbeTests(unittest.TestCase):
     def test_crash_or_absent_result_is_rejected(self):
         for text,code in [('',0),('GAME BOOT: starting',1),('GAME BOOT: execution status=0 unresolved=0 x0=0 stop=',-11)]:
             with self.assertRaises(RuntimeError): summarize(text,code)
+
+    def test_explicit_completions_survive_stop_after_last_constructor(self):
+        output='GAME CONSTRUCTOR: 0 at 0x7100000020\nGAME CONSTRUCTOR DONE: 0\nGAME BOOT: execution status=-6 unresolved=0 x0=0 stop=nnMain export absent\n'
+        self.assertEqual(summarize(output,1)['constructors_completed'],1)
+        self.assertTrue(summarize(output,1)['constructor_completion_trace'])

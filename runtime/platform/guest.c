@@ -1,4 +1,5 @@
 #include "guest.h"
+#include "loader/lookup.h"
 #include <stdlib.h>
 #include <string.h>
 #define BASE 0x7100000000ULL
@@ -9,6 +10,7 @@ struct SpGuestImage {
     SpMemory memory; Segment segments[16]; size_t count;
     uint64_t dynamic, dynamic_size, entry, fingerprint, base;
     Export *exports; size_t export_count;
+    const char **weak_undefined; size_t weak_count;
 };
 static uint16_t u16(const unsigned char *p) { uint16_t v; memcpy(&v,p,2); return v; }
 static uint32_t u32(const unsigned char *p) { uint32_t v; memcpy(&v,p,4); return v; }
@@ -85,6 +87,7 @@ int sp_guest_close(SpGuestImage **image) {
     int rc=sp_memory_unmap(&(*image)->memory);
     if (rc) return rc;
     free((*image)->exports);
+    free((*image)->weak_undefined);
     free(*image); *image=NULL; return SP_OK;
 }
 uint64_t sp_guest_fingerprint(const SpGuestImage *image) { return image ? image->fingerprint : 0; }
@@ -105,6 +108,7 @@ int sp_guest_initializers(SpGuestImage *image,uint64_t *address,size_t *count) {
     *address=image->base+array; *count=(size_t)(size/8); return SP_OK;
 }
 static int export_compare(const void *a,const void *b) { return strcmp(((const Export *)a)->name,((const Export *)b)->name); }
+static int name_compare(const void *a,const void *b) { return strcmp(*(const char *const *)a,*(const char *const *)b); }
 static int index_exports(SpGuestImage *image) {
     uint64_t symbols=0,strings=0,string_size=0,hash=0;
     for (uint64_t i=0;i+16<=image->dynamic_size;i+=16) {
@@ -119,17 +123,26 @@ static int index_exports(SpGuestImage *image) {
     uint32_t count=u32(header+4);
     if (count>1000000 || !string_size || string_size>LIMIT) return SP_INVALID;
     Export *exports=calloc(count ? count : 1,sizeof *exports); size_t used=0;
-    if (!exports) return SP_SYSTEM;
+    const char **weak=calloc(count ? count : 1,sizeof *weak); size_t weak_count=0;
+    if (!exports || !weak) { free(exports); free(weak); return SP_SYSTEM; }
     for (uint32_t i=0;i<count;++i) {
         unsigned char *symbol=sp_guest_pointer(image,image->base+symbols+i*24ULL,24,0);
-        if (!symbol || u32(symbol)>=string_size) { free(exports); return SP_INVALID; }
-        if (!u16(symbol+6)) continue;
+        if (!symbol || u32(symbol)>=string_size) { free(exports); free(weak); return SP_INVALID; }
         char *text=sp_guest_pointer(image,image->base+strings+u32(symbol),(size_t)(string_size-u32(symbol)),0);
-        if (!text || !memchr(text,0,(size_t)(string_size-u32(symbol)))) { free(exports); return SP_INVALID; }
+        if (!text || !memchr(text,0,(size_t)(string_size-u32(symbol)))) { free(exports); free(weak); return SP_INVALID; }
+        if (!u16(symbol+6)) { if ((symbol[4]>>4)==2) weak[weak_count++]=text; continue; }
         exports[used++]=(Export){text,image->base+u64(symbol+8),symbol[4]&15};
     }
     qsort(exports,used,sizeof *exports,export_compare);
-    image->exports=exports; image->export_count=used; return SP_OK;
+    qsort(weak,weak_count,sizeof *weak,name_compare);
+    image->exports=exports; image->export_count=used; image->weak_undefined=weak; image->weak_count=weak_count;
+    return SP_OK;
+}
+int sp_guest_weak_undefined(SpGuestImage *image,const char *name,int *weak) {
+    if (!image || !name || !weak) return SP_INVALID;
+    if (!image->exports) { int rc=index_exports(image); if (rc) return rc; }
+    *weak=bsearch(&name,image->weak_undefined,image->weak_count,sizeof *image->weak_undefined,name_compare)!=NULL;
+    return SP_OK;
 }
 int sp_guest_export(SpGuestImage *image,const char *name,uint64_t *address,unsigned *kind) {
     if (!image || !name || !address || !kind) return SP_INVALID;

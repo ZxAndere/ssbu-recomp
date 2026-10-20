@@ -26,7 +26,7 @@ static int vm_pages(GuestVm *vm,size_t offset,size_t size) {
     return size && !(offset%GUEST_PAGE) && !(size%GUEST_PAGE) && vm_range(vm,offset,size);
 }
 static int vm_reserve(GuestVm **out,size_t size) {
-    if (!out || *out || !size || size%GUEST_PAGE || size>UINT64_C(4)*1024*1024*1024) return SP_INVALID;
+    if (!out || *out || !size || size%GUEST_PAGE || size>UINT64_C(64)*1024*1024*1024) return SP_INVALID;
     GuestVm *vm=calloc(1,sizeof *vm);
     if (!vm) return SP_SYSTEM;
     size_t native_page=vm_host_page(),rounded=(size+native_page-1)/native_page*native_page;

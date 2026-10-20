@@ -12,10 +12,15 @@ def summarize(output,returncode):
         raise RuntimeError('Boot probe crashed or produced no controlled execution result')
     constructors=[int(value) for value in re.findall(r'GAME CONSTRUCTOR: (\d+) at ',output)]
     stopped_in_constructor=bool(constructors and 'GAME PHASE: nnMain' not in output and int(result[1])!=0)
+    completed=[int(value) for value in re.findall(r'GAME CONSTRUCTOR DONE: (\d+)',output)]
+    if completed and (len(set(completed))!=len(completed) or any(value not in constructors for value in completed)):
+        raise RuntimeError('Invalid constructor completion trace')
     return {'host_process_exit':returncode,'guest_status':int(result[1]),'unresolved_relocations':int(result[2]),
             'constructors_entered':len(constructors),
-            'constructors_completed':len(constructors)-int(stopped_in_constructor),
+            'constructors_completed':len(completed) if completed else len(constructors)-int(stopped_in_constructor),
+            'constructor_completion_trace':bool(completed),
             'nninit_startup_entered':'GAME PHASE: nninitStartup' in output,
+            'application_lifecycle_initialized':'GAME APPLICATION: lifecycle initialized' in output,
             'nnmain_entered':'GAME PHASE: nnMain' in output,'stop':result[4],
             'hardware_tested':False,'gameplay_verified':False}
 

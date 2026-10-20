@@ -50,6 +50,12 @@ int main(void) {
  CHECK(vm_reserve(&vm,512*1024*1024)==SP_OK && vm->committed_bytes==0);
  CHECK(vm_commit(vm,4096,4096)==SP_OK && vm->committed_bytes==16384);
  CHECK(vm_close(&vm)==SP_OK);
+ const size_t large=UINT64_C(62)*1024*1024*1024;
+ CHECK(vm_reserve(&vm,large)==SP_OK && vm->committed_bytes==0);
+ CHECK(vm_commit(vm,large-4096,4096)==SP_OK && vm->committed_bytes==16384);
+ CHECK(vm_pointer(vm,large-1,1,1) && !vm_pointer(vm,large-1,2,0));
+ CHECK(!vm_pointer(vm,0,1,0));
+ CHECK(vm_close(&vm)==SP_OK);
  return 0;
 }
 '''
