@@ -13,6 +13,7 @@ def summarize(output,returncode):
     constructors=[int(value) for value in re.findall(r'GAME CONSTRUCTOR: (\d+) at ',output)]
     stopped_in_constructor=bool(constructors and 'GAME PHASE: nnMain' not in output and int(result[1])!=0)
     completed=[int(value) for value in re.findall(r'GAME CONSTRUCTOR DONE: (\d+)',output)]
+    resources=re.search(r'GAME RESOURCE SUMMARY: opens=(\d+) reads=(\d+) bytes=(\d+)',output)
     if completed and (len(set(completed))!=len(completed) or any(value not in constructors for value in completed)):
         raise RuntimeError('Invalid constructor completion trace')
     return {'host_process_exit':returncode,'guest_status':int(result[1]),'unresolved_relocations':int(result[2]),
@@ -22,6 +23,11 @@ def summarize(output,returncode):
             'nninit_startup_entered':'GAME PHASE: nninitStartup' in output,
             'application_lifecycle_initialized':'GAME APPLICATION: lifecycle initialized' in output,
             'nnmain_entered':'GAME PHASE: nnMain' in output,'stop':result[4],
+            'romfs_mounted':'GAME ROMFS: mounted ' in output,
+            'resource_opens':int(resources[1]) if resources else 0,
+            'resource_reads':int(resources[2]) if resources else 0,
+            'resource_bytes_read':int(resources[3]) if resources else 0,
+            'game_initialization_complete':False,
             'hardware_tested':False,'gameplay_verified':False}
 
 

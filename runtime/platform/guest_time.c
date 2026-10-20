@@ -13,7 +13,16 @@ static uint64_t guest_wall_us(void) {
 #endif
 }
 static int time_import(Ctx *context,const char *name) {
-    if (!strcmp(name,"gettimeofday")) {
+    if (!strcmp(name,"_ZN2nn4time13IsInitializedEv")) {
+        context->x[0]=!!active->time_initialized;
+    } else if (!strcmp(name,"_ZN2nn4time10InitializeEv")) {
+        (void)guest_wall_us(); (void)sp_now_us(); active->time_initialized=1; context->x[0]=0;
+    } else if (!strcmp(name,"_ZN2nn4time8FinalizeEv")) {
+        active->time_initialized=0; context->x[0]=0;
+    } else if (!strcmp(name,"_ZN2nn4time23StandardUserSystemClock14GetCurrentTimeEPNS0_9PosixTimeE")) {
+        if (!active->time_initialized) context->x[0]=0x74;
+        else { int64_t seconds=(int64_t)(guest_wall_us()/1000000); memcpy(sp_recomp_access(context->x[0],8,1),&seconds,8); context->x[0]=0; }
+    } else if (!strcmp(name,"gettimeofday")) {
         uint64_t now=guest_wall_us();
         int64_t fields[2]={(int64_t)(now/1000000),(int64_t)(now%1000000)};
         if (context->x[0]) memcpy(sp_recomp_access(context->x[0],16,1),fields,16);

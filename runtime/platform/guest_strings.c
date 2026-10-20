@@ -18,7 +18,10 @@ static int string_digit(unsigned char byte) {
     byte=string_lower(byte);
     return byte>='a' && byte<='z' ? byte-'a'+10 : 36;
 }
-static void string_errno(uint32_t error) { memcpy(sp_recomp_access(0x7800000100ULL,4,1),&error,4); }
+static void string_errno(uint32_t error) {
+    uint64_t tls=0x7800000000ULL+(uint64_t)active->current_thread*0x10000;
+    memcpy(sp_recomp_access(tls+0x100,4,1),&error,4);
+}
 static int integer_import(Ctx *context,const char *name) {
     int small=!strcmp(name,"atoi"),simple=small || !strcmp(name,"atol") || !strcmp(name,"atoll");
     int unsign=!strcmp(name,"strtoul") || !strcmp(name,"strtoull") || !strcmp(name,"strtoumax");

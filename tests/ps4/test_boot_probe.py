@@ -19,6 +19,15 @@ class BootProbeTests(unittest.TestCase):
         for text,code in [('',0),('GAME BOOT: starting',1),('GAME BOOT: execution status=0 unresolved=0 x0=0 stop=',-11)]:
             with self.assertRaises(RuntimeError): summarize(text,code)
 
+    def test_resource_reads_are_separate_from_completed_initialization(self):
+        output='GAME PHASE: nnMain\nGAME ROMFS: mounted rom from local directory\nGAME RESOURCE SUMMARY: opens=1 reads=3 bytes=4096\nGAME BOOT: execution status=-6 unresolved=0 x0=0 stop=renderer absent\n'
+        report=summarize(output,1)
+        self.assertTrue(report['romfs_mounted'])
+        self.assertEqual(report['resource_bytes_read'],4096)
+        self.assertEqual(report['resource_reads'],3)
+        self.assertFalse(report['game_initialization_complete'])
+        self.assertFalse(report['gameplay_verified'])
+
     def test_explicit_completions_survive_stop_after_last_constructor(self):
         output='GAME CONSTRUCTOR: 0 at 0x7100000020\nGAME CONSTRUCTOR DONE: 0\nGAME BOOT: execution status=-6 unresolved=0 x0=0 stop=nnMain export absent\n'
         self.assertEqual(summarize(output,1)['constructors_completed'],1)

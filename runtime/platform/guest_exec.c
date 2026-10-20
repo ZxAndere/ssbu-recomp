@@ -7,8 +7,17 @@
 #include "virtual_memory.c"
 typedef struct { SpMemory memory; uint64_t address; size_t requested; } Allocation;
 typedef struct { GuestVm *vm; uint64_t address; } GuestRegion;
-typedef struct { SpMutex *native; uint64_t address; unsigned depth; int recursive; } GuestMutex;
+typedef struct { SpMutex *native; uint64_t address,owner; unsigned depth; int recursive; } GuestMutex;
 typedef struct { uint64_t function,argument,dso; } GuestDestructor;
+typedef struct { SpEvent *native; uint64_t address; unsigned system,auto_clear,owned; } GuestEvent;
+typedef struct { char name[16],root[1024]; uint64_t cache; unsigned used; } GuestMount;
+typedef struct { SpFile *native; uint64_t token,size; unsigned mount,first_read; } GuestFile;
+enum { TASK_CREATED=1,TASK_READY,TASK_RUNNING,TASK_EVENT,TASK_JOIN,TASK_DONE,TASK_MUTEX,TASK_GUARD,TASK_SLEEP };
+typedef struct {
+    Ctx context; SpFiber *fiber; SpMemory tls; jmp_buf escape;
+    uint64_t object,entry,argument,stack,stack_size,id,wait_object,deadline,tls_values[64],core_mask;
+    unsigned state,armed; int core;
+} GuestThread;
 typedef struct {
     SpGuestImage *main,*sdk,*resolving; const SpGuestProgram *program,*sdk_program;
     const char *sdk_imports[1024]; size_t sdk_import_count;
@@ -26,18 +35,41 @@ typedef struct {
     unsigned char primary_thread[0x1c0];
     SpEvent *application_event; uint64_t application_started;
     uint32_t performance_hints[2];
+    unsigned focus_mode,focus_state,focus_known,notifications[32],notification_head,notification_count;
+    SpModule *application_module; SpMemory application_status;
+    unsigned recording_disabled,time_initialized;
+    uint64_t graphics_allocators[2][4];
+    GuestEvent events[128]; unsigned char application_event_object[0x30];
+    GuestThread threads[33]; Ctx *root_context; unsigned current_thread,next_thread,scheduler_started;
+    uint64_t remaining_budget,quantum,next_thread_id;
+    GuestMount mounts[8]; GuestFile files[128]; uint64_t next_file,resource_reads,resource_bytes,resource_opens;
+    char romfs_override[1024];
+    struct { uint64_t address,owner; } guards[64];
 } Execution;
 static Execution *active;
+static void guest_thread_cooperate(void);
+static uint64_t current_thread_object(void);
 uint64_t sp_recomp_budget;
 static char last_error[256];
 const char *sp_guest_last_error(void) { return last_error; }
 static void fail(int error,const char *what,uint64_t address) {
     snprintf(last_error,sizeof last_error,"%s at 0x%llx",what,(unsigned long long)address);
     sp_log("GUEST STOP: %s",last_error);
-    if (active) { active->error=error; longjmp(active->escape,1); }
+    if (active) {
+        active->error=error;
+        if (active->current_thread && active->threads[active->current_thread].armed)
+            longjmp(active->threads[active->current_thread].escape,1);
+        longjmp(active->escape,1);
+    }
     abort();
 }
-void sp_recomp_checkpoint(uint64_t pc) { fail(SP_TIMEOUT,"bootstrap checkpoint budget exhausted",pc); }
+void sp_recomp_checkpoint(uint64_t pc) {
+    if (!active || active->remaining_budget<=active->quantum) fail(SP_TIMEOUT,"bootstrap checkpoint budget exhausted",pc);
+    active->remaining_budget-=active->quantum;
+    active->quantum=active->remaining_budget<10000 ? active->remaining_budget : 10000;
+    sp_recomp_budget=active->quantum;
+    guest_thread_cooperate();
+}
 void *sp_recomp_access(uint64_t address,size_t size,int write) {
     if (!active) fail(SP_INVALID,"no active guest context",address);
     static unsigned char empty;
@@ -51,9 +83,18 @@ void *sp_recomp_access(uint64_t address,size_t size,int write) {
     const uint64_t tls_base=0x7800000000ULL;
     if (!pointer && address>=tls_base && address-tls_base<=active->tls.size &&
         size<=active->tls.size-(address-tls_base)) pointer=(char *)active->tls.data+(address-tls_base);
+    if (!pointer) for (unsigned i=1;i<33;++i) {
+        GuestThread *thread=&active->threads[i]; uint64_t base=tls_base+(uint64_t)i*0x10000;
+        if (thread->tls.data && address>=base && address-base<=thread->tls.size && size<=thread->tls.size-(address-base)) {
+            pointer=(char *)thread->tls.data+(address-base); break;
+        }
+    }
     const uint64_t thread_base=0x7500000000ULL;
     if (!pointer && address>=thread_base && address-thread_base<=sizeof active->primary_thread &&
         size<=sizeof active->primary_thread-(address-thread_base)) pointer=active->primary_thread+(address-thread_base);
+    const uint64_t application_event_base=0x7500000200ULL;
+    if (!pointer && address>=application_event_base && address-application_event_base<=sizeof active->application_event_object &&
+        size<=sizeof active->application_event_object-(address-application_event_base)) pointer=active->application_event_object+(address-application_event_base);
     if (!pointer) for (size_t i=0;i<1024;++i) {
         Allocation *allocation=&active->heap[i];
         if (allocation->memory.data && address>=allocation->address && address-allocation->address<=allocation->requested &&
@@ -150,7 +191,7 @@ static GuestMutex *guest_mutex(uint64_t address,int create,int recursive) {
     void *object=sp_recomp_access(address,0x20,1);
     if (sp_mutex_create(&empty->native)) fail(SP_SYSTEM,"native mutex creation failed",address);
     memset(object,0,0x20); ((unsigned char *)object)[0]=1; ((unsigned char *)object)[1]=(unsigned char)!!recursive;
-    empty->address=address; empty->recursive=recursive; empty->depth=0;
+    empty->address=address; empty->recursive=recursive; empty->depth=0; empty->owner=0;
     return empty;
 }
 /* The guest SDK uses a 32-byte nn::os mutex for pthread_mutex_t and a
@@ -168,8 +209,7 @@ static GuestMutex *pthread_mutex(uint64_t address) {
     return guest_mutex(address,1,object[1]);
 }
 static void sync_mutex(GuestMutex *mutex) {
-    uint64_t owner=0;
-    if (mutex->depth) memcpy(&owner,sp_recomp_access(0x78000001f8ULL,8,0),8);
+    uint64_t owner=mutex->depth ? mutex->owner : 0;
     memcpy(sp_recomp_access(mutex->address+8,4,1),&mutex->depth,4);
     memcpy(sp_recomp_access(mutex->address+16,8,1),&owner,8);
 }
@@ -201,13 +241,18 @@ static int pthread_import(Ctx *context,const char *name) {
         else { guest_mutex(context->x[0],1,type==1); context->x[0]=0; }
     } else if (!strcmp(name,"pthread_mutex_trylock") || !strcmp(name,"pthread_mutex_lock")) {
         GuestMutex *mutex=pthread_mutex(context->x[0]);
-        if (mutex->depth && !mutex->recursive) {
+        if (!strcmp(name,"pthread_mutex_lock")) while (mutex->depth && mutex->owner!=current_thread_object()) {
+            if (active->current_thread) { active->threads[active->current_thread].state=TASK_MUTEX; active->threads[active->current_thread].wait_object=mutex->address; }
+            if (!sp_recomp_budget--) sp_recomp_checkpoint(context->x[30]);
+            guest_thread_cooperate();
+        }
+        if (mutex->depth && (mutex->owner!=current_thread_object() || !mutex->recursive)) {
             if (!strcmp(name,"pthread_mutex_lock")) fail(SP_INVALID,"nonrecursive pthread mutex would deadlock",context->x[0]);
             context->x[0]=16;
         } else if (mutex->depth==UINT32_MAX) context->x[0]=11; /* guest EAGAIN */
         else {
             if (!mutex->depth && sp_mutex_lock(mutex->native)) fail(SP_SYSTEM,"pthread native lock failed",context->x[0]);
-            ++mutex->depth; sync_mutex(mutex); context->x[0]=0;
+            mutex->owner=current_thread_object(); ++mutex->depth; sync_mutex(mutex); context->x[0]=0;
         }
     } else if (!strcmp(name,"pthread_mutex_unlock") || !strcmp(name,"pthread_mutex_destroy")) {
         GuestMutex *mutex=pthread_mutex(context->x[0]);
@@ -218,7 +263,7 @@ static int pthread_import(Ctx *context,const char *name) {
                 *(unsigned char *)sp_recomp_access(context->x[0],1,1)=0;
                 context->x[0]=0;
             }
-        } else if (!mutex->depth) context->x[0]=1; /* guest EPERM */
+        } else if (!mutex->depth || mutex->owner!=current_thread_object()) context->x[0]=1; /* guest EPERM */
         else {
             if (!--mutex->depth && sp_mutex_unlock(mutex->native)) fail(SP_SYSTEM,"pthread unlock failed",context->x[0]);
             sync_mutex(mutex);
@@ -236,9 +281,14 @@ static GuestRegion *guest_region(uint64_t address,size_t size) {
     fail(SP_ADDRESS,"unknown virtual memory range",address); return NULL;
 }
 #include "guest_strings.c"
+#include "guest_math.c"
 #include "guest_time.c"
+static void application_refresh_focus(void);
 #include "guest_thread.c"
+#include "guest_event.c"
 #include "guest_application.c"
+#include "guest_fs.c"
+#include "guest_graphics.c"
 static void import_named(Ctx *context,const char *name);
 static int invoke_sdk_export(Ctx *context,const char *name) {
     if (active->bootstrap && active->bootstrap->sdk_program && active->bootstrap->sdk) {
@@ -270,10 +320,10 @@ void sp_sdk_host_import(Ctx *context,int index) {
 }
 static void import_named(Ctx *context,const char *name) {
     size_t size=(size_t)context->x[2];
-    if (pthread_import(context,name) || string_import(context,name) || time_import(context,name) ||
-        thread_import(context,name) || application_import(context,name)) return;
+    if (pthread_import(context,name) || string_import(context,name) || math_import(context,name) || time_import(context,name) ||
+        thread_import(context,name) || application_import(context,name) || event_import(context,name) || fs_import(context,name) || graphics_import(context,name)) return;
     if (!strcmp(name,"__errno_location") || !strcmp(name,"___errno_location")) {
-        context->x[0]=0x7800000100ULL; /* per-execution guest TLS; never host errno */
+        context->x[0]=context->tpidr+0x100; /* Guest thread TLS; never host errno. */
     } else if (!strcmp(name,"ffs") || !strcmp(name,"ffsl") || !strcmp(name,"ffsll")) {
         uint64_t value=!strcmp(name,"ffs") ? (uint32_t)context->x[0] : context->x[0];
         context->x[0]=value ? (unsigned)__builtin_ctzll(value)+1 : 0;
@@ -374,10 +424,13 @@ static void import_named(Ctx *context,const char *name) {
                !strcmp(name,"_ZN2nn2os11FreeTlsSlotENS0_7TlsSlotE")) {
         uint64_t slot=context->x[0];
         if (slot>=64 || !active->tls_slots[slot]) fail(SP_INVALID,"unknown guest TLS slot",slot);
-        if (!strcmp(name,"_ZN2nn2os11GetTlsValueENS0_7TlsSlotE")) context->x[0]=(uint64_t)(uintptr_t)sp_tls_get(active->tls_slots[slot]);
+        if (!strcmp(name,"_ZN2nn2os11GetTlsValueENS0_7TlsSlotE")) context->x[0]=active->threads[active->current_thread].tls_values[slot];
         else if (!strcmp(name,"_ZN2nn2os11SetTlsValueENS0_7TlsSlotEm")) {
-            if (sp_tls_set(active->tls_slots[slot],(void *)(uintptr_t)context->x[1])) fail(SP_SYSTEM,"TLS set failed",slot);
-        } else if (sp_tls_destroy(&active->tls_slots[slot])) fail(SP_SYSTEM,"TLS release failed",slot);
+            active->threads[active->current_thread].tls_values[slot]=context->x[1];
+        } else {
+            if (sp_tls_destroy(&active->tls_slots[slot])) fail(SP_SYSTEM,"TLS release failed",slot);
+            for (unsigned i=0;i<33;++i) active->threads[i].tls_values[slot]=0;
+        }
     } else if (!strcmp(name,"_ZN2nn2os15InitializeMutexEPNS0_9MutexTypeEbi")) {
         guest_mutex(context->x[0],1,!!context->x[1]);
         uint32_t level=(uint32_t)context->x[2]; memcpy(sp_recomp_access(context->x[0]+4,4,1),&level,4);
@@ -385,18 +438,23 @@ static void import_named(Ctx *context,const char *name) {
                !strcmp(name,"_ZN2nn2os12TryLockMutexEPNS0_9MutexTypeE")) {
         GuestMutex *mutex=nn_mutex(context->x[0]);
         int attempt=!strcmp(name,"_ZN2nn2os12TryLockMutexEPNS0_9MutexTypeE");
-        if (mutex->depth && !mutex->recursive) {
+        if (!attempt) while (mutex->depth && mutex->owner!=current_thread_object()) {
+            if (active->current_thread) { active->threads[active->current_thread].state=TASK_MUTEX; active->threads[active->current_thread].wait_object=mutex->address; }
+            if (!sp_recomp_budget--) sp_recomp_checkpoint(context->x[30]);
+            guest_thread_cooperate();
+        }
+        if (mutex->depth && (mutex->owner!=current_thread_object() || !mutex->recursive)) {
             if (!attempt) fail(SP_INVALID,"recursive lock of nonrecursive guest mutex",context->x[0]);
             context->x[0]=0;
         } else {
             if (!mutex->depth && sp_mutex_lock(mutex->native)) fail(SP_SYSTEM,"native lock failed",context->x[0]);
             if (mutex->depth==UINT32_MAX) fail(SP_INVALID,"guest mutex recursion overflow",context->x[0]);
-            ++mutex->depth; sync_mutex(mutex);
+            mutex->owner=current_thread_object(); ++mutex->depth; sync_mutex(mutex);
             if (attempt) context->x[0]=1;
         }
     } else if (!strcmp(name,"_ZN2nn2os11UnlockMutexEPNS0_9MutexTypeE")) {
         GuestMutex *mutex=nn_mutex(context->x[0]);
-        if (!mutex->depth) fail(SP_INVALID,"unlock of unlocked guest mutex",context->x[0]);
+        if (!mutex->depth || mutex->owner!=current_thread_object()) fail(SP_INVALID,"unlock of unowned guest mutex",context->x[0]);
         if (!--mutex->depth && sp_mutex_unlock(mutex->native)) fail(SP_SYSTEM,"native unlock failed",context->x[0]);
         sync_mutex(mutex);
     } else if (!strcmp(name,"_ZN2nn2os13FinalizeMutexEPNS0_9MutexTypeE")) {
@@ -413,16 +471,27 @@ static void import_named(Ctx *context,const char *name) {
         context->x[0]=((context->x[0]&255)<<24)|((context->x[1]&255)<<16)|((context->x[2]&255)<<8)|(context->x[3]&255);
     } else if (!strcmp(name,"__cxa_guard_acquire")) {
         unsigned char *guard=sp_recomp_access(context->x[0],8,1);
+        while (!guard[0] && guard[1]) {
+            unsigned owner=0; while (owner<64 && active->guards[owner].address!=context->x[0]) ++owner;
+            if (owner==64 || active->guards[owner].owner==current_thread_object()) fail(SP_INVALID,"recursive or unowned static initialization",context->x[0]);
+            if (active->current_thread) { active->threads[active->current_thread].state=TASK_GUARD; active->threads[active->current_thread].wait_object=context->x[0]; }
+            if (!sp_recomp_budget--) sp_recomp_checkpoint(context->x[30]); guest_thread_cooperate();
+        }
         if (guard[0]) context->x[0]=0;
         else {
-            if (guard[1]) fail(SP_INVALID,"recursive static initialization",context->x[0]);
+            unsigned slot=0; while (slot<64 && active->guards[slot].address) ++slot;
+            if (slot==64) fail(SP_SYSTEM,"static initialization guard slots exhausted",context->x[0]);
+            active->guards[slot].address=context->x[0]; active->guards[slot].owner=current_thread_object();
             guard[1]=1; context->x[0]=1;
         }
     } else if (!strcmp(name,"__cxa_guard_release") || !strcmp(name,"__cxa_guard_abort")) {
         unsigned char *guard=sp_recomp_access(context->x[0],8,1);
         if (!guard[1]) fail(SP_INVALID,"static guard not acquired",context->x[0]);
+        unsigned slot=0; while (slot<64 && active->guards[slot].address!=context->x[0]) ++slot;
+        if (slot==64 || active->guards[slot].owner!=current_thread_object()) fail(SP_INVALID,"static guard released by another thread",context->x[0]);
         if (!strcmp(name,"__cxa_guard_release")) guard[0]=1;
         guard[1]=0;
+        active->guards[slot].address=active->guards[slot].owner=0;
     } else if (!strcmp(name,"__cxa_atexit")) {
         if (active->destructor_count==512) context->x[0]=(uint64_t)-1;
         else {
@@ -464,6 +533,7 @@ static int execute(SpGuestImage *image,const SpGuestProgram *program,uint64_t en
     if (!context->x[31]) context->x[31]=0x7700000000ULL+execution->stack.size;
     if (!context->tpidr) context->tpidr=0x7800000000ULL;
     last_error[0]=0; active=execution; sp_recomp_budget=1000000;
+    execution->root_context=context; execution->remaining_budget=execution->quantum=1000000; execution->next_thread_id=2;
     if (!setjmp(execution->escape)) {
         initialize_primary_thread();
         if (sequence) sp_log("GAME PHASE: nninitStartup");
@@ -489,9 +559,9 @@ static int execute(SpGuestImage *image,const SpGuestProgram *program,uint64_t en
             uint64_t main_result=context->x[0];
             for (unsigned pass=0;pass<4;++pass) for (size_t i=0;i<64;++i)
                 if (execution->tls_slots[i] && execution->tls_destructors[i]) {
-                    uint64_t value=(uint64_t)(uintptr_t)sp_tls_get(execution->tls_slots[i]);
+                    uint64_t value=execution->threads[0].tls_values[i];
                     if (value) {
-                        if (sp_tls_set(execution->tls_slots[i],NULL)) fail(SP_SYSTEM,"TLS destructor clear failed",i);
+                        execution->threads[0].tls_values[i]=0;
                         context->x[0]=value; invoke(context,execution->tls_destructors[i]);
                     }
                 }
@@ -506,7 +576,19 @@ static int execute(SpGuestImage *image,const SpGuestProgram *program,uint64_t en
         }
     }
     active=NULL; int rc=execution->error;
+    if (execution->resource_opens) sp_log("GAME RESOURCE SUMMARY: opens=%llu reads=%llu bytes=%llu",(unsigned long long)execution->resource_opens,
+        (unsigned long long)execution->resource_reads,(unsigned long long)execution->resource_bytes);
+    for (unsigned i=0;i<128;++i) if (execution->files[i].native) sp_file_close(&execution->files[i].native);
+    for (unsigned i=1;i<33;++i) {
+        if (execution->threads[i].fiber) sp_fiber_destroy(&execution->threads[i].fiber);
+        if (execution->threads[i].tls.data) sp_memory_unmap(&execution->threads[i].tls);
+    }
+    if (execution->scheduler_started) sp_fiber_thread_shutdown();
+    for (unsigned i=0;i<128;++i) if (execution->events[i].native && execution->events[i].owned)
+        sp_event_destroy(&execution->events[i].native);
     if (execution->application_event) sp_event_destroy(&execution->application_event);
+    if (execution->application_status.data) sp_memory_unmap(&execution->application_status);
+    if (execution->application_module) sp_module_close(&execution->application_module);
     for (size_t i=0;i<16;++i) if (execution->regions[i].vm) vm_close(&execution->regions[i].vm);
     for (size_t i=0;i<64;++i) if (execution->tls_slots[i]) sp_tls_destroy(&execution->tls_slots[i]);
     for (size_t i=0;i<512;++i) if (execution->mutexes[i].native) {
@@ -794,6 +876,92 @@ static void virtual_probe(Ctx *context) {
     context->x[0]=passed;
 }
 static void sdk_probe_leaf(Ctx *context) { context->x[0]=4321; }
+static void worker_probe_fail(Ctx *context) { (void)context; guest_trap("intentional worker failure",0x7100000054ULL); }
+static void worker_probe_child(Ctx *context) {
+    unsigned role=(unsigned)context->x[0]; const uint64_t result=0x7100003c20ULL,mutex=0x7100003b40ULL,event=0x7100003b00ULL,guard=0x7100003bc0ULL;
+    uint32_t *flags=sp_recomp_access(result,4,1);
+    context->x[0]=0; host_import(context,10); if (!context->x[0]) *flags|=role==1 ? 1u : 2u;
+    context->x[0]=0; context->x[1]=role==1 ? 0x2222 : 0x3333; host_import(context,9);
+    if (role==1) {
+        context->x[0]=mutex; host_import(context,14); if (!context->x[0]) *flags|=4;
+        context->x[0]=mutex; host_import(context,13);
+        context->x[0]=guard; host_import(context,19); if (!context->x[0]) *flags|=8;
+        for (unsigned i=0;i<20500;++i) if (!sp_recomp_budget--) sp_recomp_checkpoint(0x710000004cULL);
+        context->x[0]=mutex; host_import(context,14); if (context->x[0]) *flags|=16;
+        context->x[0]=mutex; host_import(context,15); context->x[0]=mutex; host_import(context,15);
+        context->x[0]=event; host_import(context,5);
+    } else {
+        context->x[0]=event; host_import(context,6); *flags|=32;
+    }
+    context->x[0]=0; host_import(context,10);
+    if (context->x[0]==(role==1 ? 0x2222 : 0x3333)) *flags|=role==1 ? 64u : 128u;
+}
+static void workers_probe(Ctx *context) {
+    const uint64_t one=0x7100003700ULL,two=0x7100003900ULL,event=0x7100003b00ULL,mutex=0x7100003b40ULL,guard=0x7100003bc0ULL;
+    uint32_t zero=0; memcpy(sp_recomp_access(0x7100003c20ULL,4,1),&zero,4);
+    context->x[0]=0x7100003c00ULL; context->x[1]=0; host_import(context,8);
+    context->x[0]=0; context->x[1]=0x1111; host_import(context,9);
+    context->x[0]=event; context->x[1]=0; context->x[2]=0; host_import(context,4);
+    context->x[0]=mutex; context->x[1]=1; context->x[2]=0; host_import(context,12);
+    context->x[0]=mutex; host_import(context,13);
+    memset(sp_recomp_access(guard,8,1),0,8); context->x[0]=guard; host_import(context,19);
+    uint64_t stacks[2]={0};
+    for (unsigned i=0;i<2;++i) {
+        context->x[0]=32768; host_import(context,17); stacks[i]=context->x[0];
+        context->x[0]=i ? two : one; context->x[1]=context->x[9] ? 0x7100000054ULL : 0x710000004cULL;
+        context->x[2]=i+1; context->x[3]=stacks[i]; context->x[4]=32768; context->x[5]=16; host_import(context,0);
+        context->x[0]=i ? two : one; host_import(context,1);
+    }
+    context->x[0]=mutex; host_import(context,15); guest_thread_cooperate();
+    context->x[0]=guard; host_import(context,20);
+    context->x[0]=one; host_import(context,2); context->x[0]=two; host_import(context,2);
+    uint32_t flags=0; memcpy(&flags,sp_recomp_access(0x7100003c20ULL,4,0),4);
+    context->x[0]=0; host_import(context,10); if (context->x[0]==0x1111) flags|=256;
+    if (*(unsigned char *)sp_recomp_access(one+0x40,1,0)==4 && *(unsigned char *)sp_recomp_access(two+0x40,1,0)==4) flags|=512;
+    context->x[0]=one; host_import(context,3); context->x[0]=two; host_import(context,3);
+    for (unsigned i=0;i<2;++i) { context->x[0]=stacks[i]; host_import(context,18); }
+    context->x[0]=0; host_import(context,11); context->x[0]=event; host_import(context,7);
+    context->x[0]=mutex; host_import(context,16); context->x[0]=flags;
+}
+static void resource_probe(Ctx *context) {
+    const uint64_t name=0x7100003700ULL,path=name+32,handle=name+128,out=name+136,buffer=name+160,cache=0x7100004000ULL;
+    uint64_t flags=0,size=0,token=0,count=0;
+#ifdef SSBU_PS4
+    strcpy(active->romfs_override,"/app0");
+#else
+    strcpy(active->romfs_override,"platform/ps4");
+#endif
+    memcpy(sp_recomp_access(name,4,1),"rom",4);
+    memcpy(sp_recomp_access(path,17,1),"rom:/fixture.txt",17);
+    context->x[0]=out; fs_import(context,"_ZN2nn2fs22QueryMountRomCacheSizeEPm");
+    memcpy(&size,sp_recomp_access(out,8,0),8); if (!context->x[0] && size==FS_CACHE_BYTES) flags|=1;
+    context->x[0]=name; context->x[1]=cache; context->x[2]=size; fs_import(context,"_ZN2nn2fs8MountRomEPKcPvm");
+    if (!context->x[0]) flags|=2;
+    context->x[0]=name; fs_import(context,"_ZN2nn2fs8MountRomEPKcPvm"); if (context->x[0]==FS_MOUNT_EXISTS) flags|=4;
+    context->x[0]=handle; context->x[1]=path; context->x[2]=1; fs_import(context,"_ZN2nn2fs8OpenFileEPNS0_10FileHandleEPKci");
+    if (!context->x[0]) flags|=8; memcpy(&token,sp_recomp_access(handle,8,0),8);
+    context->x[0]=out; context->x[1]=token; fs_import(context,"_ZN2nn2fs11GetFileSizeEPlNS0_10FileHandleE");
+    memcpy(&size,sp_recomp_access(out,8,0),8); if (!context->x[0] && size>=19) flags|=16;
+    for (unsigned i=0;i<2;++i) {
+        context->x[0]=out; context->x[1]=token; context->x[2]=0; context->x[3]=buffer; context->x[4]=128;
+        fs_import(context,"_ZN2nn2fs8ReadFileEPmNS0_10FileHandleElPvm"); memcpy(&count,sp_recomp_access(out,8,0),8);
+        if (!context->x[0] && count==size && !memcmp(sp_recomp_access(buffer,19,0),"SSBU-PS4-DIAGNOSTIC",19)) flags|=32u<<i;
+    }
+    context->x[0]=token; context->x[1]=size-1; context->x[2]=buffer; context->x[3]=2;
+    fs_import(context,"_ZN2nn2fs8ReadFileENS0_10FileHandleElPvm"); if (context->x[0]==FS_OUT_OF_RANGE) flags|=128;
+    context->x[0]=handle; context->x[1]=path; context->x[2]=2; fs_import(context,"_ZN2nn2fs8OpenFileEPNS0_10FileHandleEPKci");
+    if (context->x[0]==FS_PERMISSION) flags|=256;
+    memcpy(sp_recomp_access(path,20,1),"rom:/../fixture.txt",20);
+    context->x[0]=handle; context->x[1]=path; context->x[2]=1; fs_import(context,"_ZN2nn2fs8OpenFileEPNS0_10FileHandleEPKci");
+    if (context->x[0]==FS_PERMISSION) flags|=512;
+    context->x[0]=token; fs_import(context,"_ZN2nn2fs9CloseFileENS0_10FileHandleE");
+    context->x[0]=name; fs_import(context,"_ZN2nn2fs7UnmountEPKc"); if (!active->mounts[0].used) flags|=1024;
+    context->v[0].f[0]=8.0f; math_import(context,"log2f"); if (context->v[0].f[0]==3.0f) flags|=2048;
+    context->v[0].df[0]=9.0; math_import(context,"sqrt"); if (context->v[0].df[0]==3.0) flags|=4096;
+    context->v[0].f[0]=2; context->v[1].f[0]=4; math_import(context,"powf"); if (context->v[0].f[0]==16) flags|=8192;
+    if (language_code(14)==UINT64_C(0x3931342d7365)) flags|=16384;
+    context->x[0]=flags;
+}
 static void application_probe(Ctx *context) {
     uint64_t passed=0;
     host_import(context,0); SpEvent *event=active->application_event;
@@ -915,6 +1083,28 @@ int sp_recomp_test(const char *path) {
             memset(&context,0,sizeof context);
             VERIFY(sp_guest_run(image,&thread_program,0x7100000044ULL,&context)==SP_OK);
             for (unsigned bit=0;bit<6;++bit) VERIFY((context.x[0]&(1u<<bit))!=0);
+            const FnEntry workers_functions[]={{0x7100000044ULL,workers_probe},{0x710000004cULL,worker_probe_child},{0x7100000054ULL,worker_probe_fail}};
+            const DynSym workers_symbols[]={
+                {"_ZN2nn2os12CreateThreadEPNS0_10ThreadTypeEPFvPvES3_S3_mi",0,0},{"_ZN2nn2os11StartThreadEPNS0_10ThreadTypeE",0,0},
+                {"_ZN2nn2os10WaitThreadEPNS0_10ThreadTypeE",0,0},{"_ZN2nn2os13DestroyThreadEPNS0_10ThreadTypeE",0,0},
+                {"_ZN2nn2os15InitializeEventEPNS0_9EventTypeEbNS0_14EventClearModeE",0,0},{"_ZN2nn2os11SignalEventEPNS0_9EventTypeE",0,0},
+                {"_ZN2nn2os9WaitEventEPNS0_9EventTypeE",0,0},{"_ZN2nn2os13FinalizeEventEPNS0_9EventTypeE",0,0},
+                {"_ZN2nn2os18SdkAllocateTlsSlotEPNS0_7TlsSlotEPFvmE",0,0},{"_ZN2nn2os11SetTlsValueENS0_7TlsSlotEm",0,0},
+                {"_ZN2nn2os11GetTlsValueENS0_7TlsSlotE",0,0},{"_ZN2nn2os11FreeTlsSlotENS0_7TlsSlotE",0,0},
+                {"_ZN2nn2os15InitializeMutexEPNS0_9MutexTypeEbi",0,0},{"_ZN2nn2os9LockMutexEPNS0_9MutexTypeE",0,0},
+                {"_ZN2nn2os12TryLockMutexEPNS0_9MutexTypeE",0,0},{"_ZN2nn2os11UnlockMutexEPNS0_9MutexTypeE",0,0},
+                {"_ZN2nn2os13FinalizeMutexEPNS0_9MutexTypeE",0,0},{"malloc",0,0},{"free",0,0},{"__cxa_guard_acquire",0,0},{"__cxa_guard_release",0,0}};
+            SpGuestProgram workers_program={workers_functions,3,workers_symbols,21,sp_guest_fingerprint(image)};
+            memset(&context,0,sizeof context);
+            VERIFY(sp_guest_run(image,&workers_program,0x7100000044ULL,&context)==SP_OK);
+            for (unsigned bit=0;bit<10;++bit) VERIFY((context.x[0]&(1u<<bit))!=0);
+            context.x[9]=1;
+            VERIFY(sp_guest_run(image,&workers_program,0x7100000044ULL,&context)==SP_UNSUPPORTED);
+            const FnEntry resource_functions[]={{0x7100000044ULL,resource_probe}};
+            SpGuestProgram resource_program={resource_functions,1,NULL,0,sp_guest_fingerprint(image)};
+            memset(&context,0,sizeof context);
+            VERIFY(sp_guest_run(image,&resource_program,0x7100000044ULL,&context)==SP_OK);
+            for (unsigned bit=0;bit<15;++bit) VERIFY((context.x[0]&(1u<<bit))!=0);
             const FnEntry application_functions[]={{0x7100000044ULL,application_probe}};
             const DynSym application_symbols[]={{"_ZN2nn2oe10InitializeEv",0,0},{"_ZN2nn2oe8FinalizeEv",0,0},
                 {"_ZN2nn2oe27SetPerformanceConfigurationENS0_15PerformanceModeEi",0,0}};
