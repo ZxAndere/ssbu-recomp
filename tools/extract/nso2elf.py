@@ -12,6 +12,8 @@ for i, (ho, cso) in enumerate(((0x10, 0x60), (0x20, 0x64), (0x30, 0x68))):
     assert len(raw) == size
     ok = hashlib.sha256(raw).digest() == d[0xA0+i*0x20:0xC0+i*0x20]
     print('seg', i, 'vaddr %x size %x sha256 %s' % (moff, size, 'OK' if ok else 'MISMATCH'))
+    if flags & (1 << (i + 3)) and not ok:
+        raise ValueError('NSO segment SHA256 mismatch; refusing to convert corrupt input')
     segs.append((moff, raw))
 bss = struct.unpack('<I', d[0x3c:0x40])[0]
 print('build id', d[0x40:0x54].hex())

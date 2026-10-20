@@ -25,6 +25,8 @@ def extract_exefs(nca, out_dir):
     head = nca.read(sec, pfs, 16)
     assert head[:4] == b'PFS0', 'no ExeFS in %s' % nca.name
     count, strings_size = struct.unpack('<II', head[4:12])
+    if count > 256 or strings_size > 65536:
+        raise ValueError('Invalid ExeFS table size')
     table = nca.read(sec, pfs + 16, 24 * count + strings_size)
     strings = table[24 * count:]
     data = pfs + 16 + 24 * count + strings_size
@@ -32,6 +34,10 @@ def extract_exefs(nca, out_dir):
     for i in range(count):
         off, size, name_off, _ = struct.unpack('<QQII', table[i * 24:i * 24 + 24])
         name = strings[name_off:strings.index(b'\0', name_off)].decode()
+        if not name or name in ('.', '..') or '/' in name or '\\' in name or ':' in name:
+            raise ValueError('Invalid ExeFS file name')
+        if data + off > sec['size'] or size > sec['size'] - data - off:
+            raise ValueError('ExeFS file outside section')
         with open(os.path.join(out_dir, name), 'wb') as f:
             f.write(nca.read(sec, data + off, size))
         print('  exefs %10d  %s' % (size, name))
