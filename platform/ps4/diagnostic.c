@@ -121,11 +121,11 @@ int sp_diagnostic(const char *fixture) {
 }
 #ifndef SSBU_PS4
 int main(int argc, char **argv) {
+    if (sp_init(NULL)) return 2;
     if (argc==3 && !strcmp(argv[1],"--guest-batch")) return sp_guest_batch(argv[2]);
     if (argc==3 && !strcmp(argv[1],"--guest-inspect")) return sp_guest_inspect(argv[2]);
     if (argc==3 && !strcmp(argv[1],"--game-boot")) return sp_game_bootstrap(argv[2]) ? 1 : 0;
     if (argc < 2 || argc > 4) { fprintf(stderr, "usage: diagnostic <fixture> [new scratch file] [synthetic ELF]\n"); return 2; }
-    if (sp_init(NULL)) return 2;
     int result = sp_diagnostic(argv[1]);
     result |= sp_services_test(argv[1], argc > 2 ? argv[2] : NULL);
     result |= sp_media_test();

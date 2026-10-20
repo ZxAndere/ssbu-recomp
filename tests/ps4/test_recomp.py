@@ -42,6 +42,16 @@ class RecompilerTests(unittest.TestCase):
             data=bytearray(original);struct.pack_into('<Q',data,offset,value)
             with self.subTest(offset=offset,value=value): self.assertEqual(self.inspect(data),1)
 
+    def test_initializer_array_bounds(self):
+        original=IMAGE.read_bytes()
+        # Replace SYMENT (not required by this fixture) and STRSZ (no imports).
+        for address,size in [(0x2000,8),(1<<40,8),(0x2000,7),(0x2000,32776)]:
+            data=bytearray(original)
+            struct.pack_into('<QQ',data,0x2040+7*16,25,address)
+            struct.pack_into('<QQ',data,0x2040+8*16,27,size)
+            with self.subTest(address=address,size=size):
+                self.assertEqual(self.inspect(data),0 if (address,size)==(0x2000,8) else 1)
+
     def test_lifted_c_matches_unicorn_arm64(self):
         if importlib.util.find_spec('unicorn') is None: self.skipTest('install unicorn in build_ps4/python-deps')
         from unicorn import Uc,UC_ARCH_ARM64,UC_MODE_ARM

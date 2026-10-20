@@ -27,16 +27,19 @@ def fixture():
     header += struct.pack('<HHIQQQIHHHHHH', 3, 183, 1, 0x20, 64, 0, 0, 64, 56, 4, 64, 0, 0)
     data[:64] = header
     ph = [(1,5,0x1000,0,text_size,text_size), (1,4,0x2000,0x1000,0x300,0x300),
-          (1,6,0x3000,0x2000,0x20,0x4000), (2,4,0x2040,0x1040,0xb0,0xb0)]
+          (1,6,0x3000,0x2000,0x20,0x4000), (2,4,0x2040,0x1040,0xc0,0xc0)]
     for i,(kind,flags,offset,address,filesz,memsz) in enumerate(ph):
         struct.pack_into('<IIQQQQQQ',data,64+i*56,kind,flags,offset,address,address,filesz,memsz,0x1000 if kind==1 else 8)
     struct.pack_into('<I',data,0x1004,0x1000)
     data[0x2000:0x2004] = b'MOD0'
     struct.pack_into('<i',data,0x2004,0x40)
-    tags = [(7,0x1240),(8,24),(9,24),(23,0x1258),(2,0),(6,0x1200),(5,0x1218),(10,1),(11,24),(20,7),(0,0)]
+    tags = [(7,0x1240),(8,24),(9,24),(23,0x1258),(2,0),(6,0x11e8),(5,0x1218),(10,7),(11,24),(20,7),(4,0x1280),(0,0)]
     for i,(tag,value) in enumerate(tags):
         struct.pack_into('<QQ',data,0x2040+i*16,tag,value)
     struct.pack_into('<QQq',data,0x2240,0x2010,0x403,0x20)
+    struct.pack_into('<IBBHQQ',data,0x2200,1,0x12,0,1,0x44,8)
+    data[0x2218:0x221f]=b'\0probe\0'
+    struct.pack_into('<IIIII',data,0x2280,1,2,1,0,0)
     struct.pack_into('<Q',data,0x3000,7)
     for offset,instructions in programs.items():
         for i,instruction in enumerate(instructions):
