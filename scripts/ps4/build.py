@@ -207,6 +207,8 @@ def main():
     parser.add_argument("--llvm-bin", default=os.environ.get("PS4_LLVM_BIN"))
     parser.add_argument("--sdk", default=os.environ.get("OO_PS4_TOOLCHAIN"))
     parser.add_argument('--host-vulkan-headers',type=Path,help='Opt-in real desktop Vulkan initialization; requires Vulkan-Headers/include')
+    parser.add_argument('--ps4-gnm-root',type=Path,help='Opt-in native GPU queue initialization using OpenGNM headers')
+    parser.add_argument('--ps4-gnm-library',type=Path,help='Matching Orbis-built libopengnm.a')
     parser.add_argument("--check", action="store_true", help="Check tools only")
     parser.add_argument("--package", action="store_true", help="Also build/validate a diagnostic PKG")
     parser.add_argument("--game-generated", type=Path, help="Local upstream lift output, never published automatically")
@@ -221,6 +223,9 @@ def main():
     args = parser.parse_args()
     if args.host_vulkan_headers and (args.target!='host' or not (args.host_vulkan_headers/'vulkan/vulkan.h').is_file()):
         parser.error('--host-vulkan-headers requires host and a valid Vulkan-Headers/include directory')
+    if args.ps4_gnm_root or args.ps4_gnm_library:
+        if args.target!='ps4' or not args.ps4_gnm_root or not args.ps4_gnm_library or not (args.ps4_gnm_root/'include/gnmdriver.h').is_file() or not args.ps4_gnm_library.is_file():
+            parser.error('--ps4-gnm-root and --ps4-gnm-library require PS4 and matching existing headers/library')
     if not 1 <= args.jobs <= 8: parser.error('--jobs must be 1..8')
     if args.build_label and not re.fullmatch(r'[a-z0-9-]{1,40}',args.build_label): parser.error('Invalid --build-label')
     if args.package and args.target != "ps4":
@@ -304,6 +309,7 @@ def main():
         if args.sdk_generated: flags += ['-DSP_SDK_LINKED']
     # Runtime-only options do not invalidate unchanged translated game objects.
     if args.host_vulkan_headers: flags += ['-DSP_GUEST_VULKAN','-I',str(args.host_vulkan_headers)]
+    if args.ps4_gnm_root: flags += ['-DSP_GUEST_GNM','-I',str(args.ps4_gnm_root/'include')]
     smoke_object = build / "smoke_generated.o"
     run([clang,*flags,*target_flags,"-Wno-unused-label","-include",ROOT / "runtime/platform/guest_bridge.h",
          "-c",ROOT / "build_ps4/smoke/smoke_generated.c","-o",smoke_object])
@@ -324,9 +330,10 @@ def main():
         run([clang, *flags, "-c", source, "-o", obj])
         objects.append(obj)
     elf, oelf, eboot = build / "diagnostic.elf", build / "diagnostic.oelf", build / "eboot.bin"
+    if args.ps4_gnm_library: objects.append(args.ps4_gnm_library.resolve())
     response_run(linker, ["-m", "elf_x86_64", "-pie", "--script", sdk / "link.x", "--eh-frame-hdr",
          "-L" + str(sdk / "lib"), sdk / "lib/crt1.o", *objects, "-lc", "-lkernel",
-         "-lScePad", "-lSceUserService", "-lSceAudioOut", "-lSceVideoOut", "-lSceSystemService", "-o", elf],build/"orbis-link.rsp")
+         "-lScePad", "-lSceUserService", "-lSceAudioOut", "-lSceVideoOut", "-lSceSystemService", *(['-lSceGnmDriver'] if args.ps4_gnm_library else []), "-o", elf],build/"orbis-link.rsp")
     verify_elf(elf)
     env = dict(os.environ, OO_PS4_TOOLCHAIN=str(sdk))
     run([fself, "-in", elf, "--out", oelf, "--eboot", eboot, "--paid", "0x3800000000000011"], env=env)

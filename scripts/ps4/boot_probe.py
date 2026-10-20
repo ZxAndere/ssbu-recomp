@@ -1,6 +1,7 @@
 """Capture a native PC boot probe without treating a controlled guest stop as gameplay."""
 import argparse
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -25,6 +26,7 @@ def summarize(output,returncode):
             'nnmain_entered':'GAME PHASE: nnMain' in output,'stop':result[4],
             'romfs_mounted':'GAME ROMFS: mounted ' in output,
             'native_desktop_vulkan_device_created':'GAME GRAPHICS: real Vulkan device ' in output,
+            'native_game_shader_modules_created':len(re.findall(r'GAME NVN SHADER: native module created stage=',output)),
             'game_image_rendered':False,
             'resource_opens':int(resources[1]) if resources else 0,
             'resource_reads':int(resources[2]) if resources else 0,
@@ -38,10 +40,14 @@ def main():
     parser.add_argument('--executable',type=Path,required=True)
     parser.add_argument('--image',type=Path,required=True)
     parser.add_argument('--out',type=Path,required=True)
+    parser.add_argument('--checkpoints',type=int,default=1000000,help='Bounded boot checkpoint budget, 10000..1000000000')
     args=parser.parse_args()
-    result=subprocess.run([str(args.executable.resolve()),'--game-boot',str(args.image.resolve())],capture_output=True,text=True,errors='replace',timeout=180)
+    if not 10000<=args.checkpoints<=1000000000: parser.error('--checkpoints must be 10000..1000000000')
+    env=dict(os.environ,SSBU_BOOT_CHECKPOINTS=str(args.checkpoints))
+    result=subprocess.run([str(args.executable.resolve()),'--game-boot',str(args.image.resolve())],env=env,capture_output=True,text=True,errors='replace',timeout=180)
     output=result.stdout+result.stderr
     report=summarize(output,result.returncode)
+    report['checkpoint_budget']=args.checkpoints
     args.out.parent.mkdir(parents=True,exist_ok=True)
     args.out.with_suffix('.log').write_text(output,encoding='utf-8')
     args.out.write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8')

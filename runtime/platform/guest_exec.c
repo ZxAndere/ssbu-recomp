@@ -13,6 +13,25 @@ typedef struct { uint64_t function,argument,dso; } GuestDestructor;
 typedef struct { SpEvent *native; uint64_t address; unsigned system,auto_clear,owned; } GuestEvent;
 typedef struct { char name[16],root[1024]; uint64_t cache; unsigned used; } GuestMount;
 typedef struct { SpFile *native; uint64_t token,size; unsigned mount,first_read; } GuestFile;
+enum { NVN_POOL_BUILDER=1,NVN_POOL,NVN_BUFFER_BUILDER,NVN_BUFFER,NVN_TEXTURE_POOL,NVN_SAMPLER_POOL };
+typedef struct {
+    uint64_t key,device,memory,size,pool,offset; unsigned kind,flags;
+    NativeBuffer *native;
+} GuestNvnStorage;
+typedef struct {
+    unsigned operation,bytes; uint64_t object; unsigned char state[24];
+} GuestNvnRecord;
+typedef struct {
+    uint64_t key,device,callback,callback_data,command_memory,control_memory,command_bytes,control_bytes;
+    uint64_t command_used,control_used;
+    unsigned recording,callback_enabled;
+    GuestNvnRecord records[128]; unsigned record_count;
+} GuestNvnCommand;
+typedef struct {
+    uint64_t key,device,memory,memory_bytes,command_bytes,compute_bytes,control_bytes,threshold;
+    unsigned builder,flags,priority;
+    uint64_t texture_pool,sampler_pool; unsigned state_mask; unsigned char states[7][24];
+} GuestNvnQueue;
 enum { TASK_CREATED=1,TASK_READY,TASK_RUNNING,TASK_EVENT,TASK_JOIN,TASK_DONE,TASK_MUTEX,TASK_GUARD,TASK_SLEEP };
 typedef struct {
     Ctx context; SpFiber *fiber; SpMemory tls; jmp_buf escape;
@@ -41,9 +60,17 @@ typedef struct {
     unsigned recording_disabled,time_initialized;
     uint64_t graphics_allocators[2][4];
     NativeGraphics *graphics; uint64_t graphics_workspace,graphics_workspace_bytes;
-    struct { char name[128]; } nvn_entries[2048]; unsigned nvn_entry_count;
+    struct { char name[128]; uint64_t sdk_target; } nvn_entries[2048]; unsigned nvn_entry_count;
     uint64_t nvn_device,nvn_builder; uint32_t nvn_builder_flags;
+    uint32_t nvn_origin_mode,nvn_depth_mode;
     unsigned nvn_debugger_disabled;
+    GuestNvnStorage nvn_storage[512];
+    GuestNvnCommand nvn_commands[64];
+    struct { uint64_t handle; GuestNvnRecord *records; unsigned count; } nvn_lists[128]; uint64_t next_nvn_list;
+    GuestNvnQueue nvn_queues[32];
+    struct { uint64_t key,device; NativeShader *stages[6]; } nvn_programs[128];
+    struct { uint64_t key; NativeFence *native; } nvn_syncs[128];
+    struct { uint64_t key,pool,index; NativeSamplerParameters parameters; NativeSampler *native; } nvn_samplers[512];
     GuestEvent events[128]; unsigned char application_event_object[0x30];
     GuestThread threads[33]; Ctx *root_context; unsigned current_thread,next_thread,scheduler_started;
     uint64_t remaining_budget,quantum,next_thread_id;
@@ -290,6 +317,7 @@ static GuestRegion *guest_region(uint64_t address,size_t size) {
     fail(SP_ADDRESS,"unknown virtual memory range",address); return NULL;
 }
 #include "guest_strings.c"
+#include "guest_algorithms.c"
 #include "guest_math.c"
 #include "guest_time.c"
 static void application_refresh_focus(void);
@@ -330,7 +358,7 @@ void sp_sdk_host_import(Ctx *context,int index) {
 static void import_named(Ctx *context,const char *name) {
     size_t size=(size_t)context->x[2];
     if (pthread_import(context,name) || string_import(context,name) || math_import(context,name) || time_import(context,name) ||
-        thread_import(context,name) || application_import(context,name) || event_import(context,name) || fs_import(context,name) || graphics_import(context,name)) return;
+        thread_import(context,name) || application_import(context,name) || event_import(context,name) || fs_import(context,name) || graphics_import(context,name) || algorithm_import(context,name)) return;
     if (!strcmp(name,"__errno_location") || !strcmp(name,"___errno_location")) {
         context->x[0]=context->tpidr+0x100; /* Guest thread TLS; never host errno. */
     } else if (!strcmp(name,"ffs") || !strcmp(name,"ffsl") || !strcmp(name,"ffsll")) {
@@ -541,8 +569,18 @@ static int execute(SpGuestImage *image,const SpGuestProgram *program,uint64_t en
     if (sp_memory_map(&execution->tls,64*1024,NULL)) { sp_memory_unmap(&execution->stack); free(execution); return SP_SYSTEM; }
     if (!context->x[31]) context->x[31]=0x7700000000ULL+execution->stack.size;
     if (!context->tpidr) context->tpidr=0x7800000000ULL;
-    last_error[0]=0; active=execution; sp_recomp_budget=1000000;
-    execution->root_context=context; execution->remaining_budget=execution->quantum=1000000; execution->next_thread_id=2;
+    uint64_t budget=1000000;
+    if (sequence) {
+        const char *configured=getenv("SSBU_BOOT_CHECKPOINTS");
+        if (configured && *configured) {
+            uint64_t parsed=0; const char *at=configured;
+            while (*at>='0' && *at<='9' && parsed<=UINT64_C(1000000000)) parsed=parsed*10+(unsigned)(*at++-'0');
+            if (!*at && parsed>=10000 && parsed<=UINT64_C(1000000000)) budget=parsed;
+        }
+        sp_log("GAME BOOT: checkpoint budget=%llu",(unsigned long long)budget);
+    }
+    last_error[0]=0; active=execution; sp_recomp_budget=budget;
+    execution->root_context=context; execution->remaining_budget=execution->quantum=budget; execution->next_thread_id=2;
     if (!setjmp(execution->escape)) {
         initialize_primary_thread();
         if (sequence) sp_log("GAME PHASE: nninitStartup");
@@ -585,6 +623,19 @@ static int execute(SpGuestImage *image,const SpGuestProgram *program,uint64_t en
         }
     }
     active=NULL; int rc=execution->error;
+    for (unsigned i=0;i<128;++i) for (unsigned stage=0;stage<6;++stage) if (execution->nvn_programs[i].stages[stage])
+        if (native_shader_close(execution->graphics,&execution->nvn_programs[i].stages[stage]))
+            sp_log("GAME GRAPHICS: native shader cleanup failed; module retained");
+    for (unsigned i=0;i<128;++i) free(execution->nvn_lists[i].records);
+    for (unsigned i=0;i<512;++i) if (execution->nvn_samplers[i].native)
+        if (native_sampler_close(execution->graphics,&execution->nvn_samplers[i].native))
+            sp_log("GAME GRAPHICS: native sampler cleanup failed; object retained");
+    for (unsigned i=0;i<128;++i) if (execution->nvn_syncs[i].native)
+        if (native_fence_close(execution->graphics,&execution->nvn_syncs[i].native))
+            sp_log("GAME GRAPHICS: native fence cleanup failed; storage retained");
+    for (unsigned i=0;i<512;++i) if (execution->nvn_storage[i].native)
+        if (native_buffer_close(execution->graphics,&execution->nvn_storage[i].native))
+            sp_log("GAME GRAPHICS: native memory-pool cleanup failed; storage retained");
     native_graphics_close(&execution->graphics);
     if (execution->resource_opens) sp_log("GAME RESOURCE SUMMARY: opens=%llu reads=%llu bytes=%llu",(unsigned long long)execution->resource_opens,
         (unsigned long long)execution->resource_reads,(unsigned long long)execution->resource_bytes);
@@ -986,6 +1037,34 @@ static void graphics_link_probe(Ctx *context) {
     }
     if (active->nvn_entry_count==705) flags|=16;
     if (context->x[9]) invoke(context,nvn_entry("original_test_unimplemented_699"));
+    /* The caller may mutate a state immediately after recording it. Verify
+     * snapshots, accounting and immutable ownership of the completed list. */
+    const uint64_t command_key=text+512,color=text+768;
+    GuestNvnCommand *command=&active->nvn_commands[0]; command->key=command_key;
+    command->command_memory=heap_allocate(4096,16); command->command_bytes=4096;
+    command->control_memory=heap_allocate(4096,16); command->control_bytes=4096; command->recording=1;
+    uint32_t initial=0xa35c9182,modified=0x57e8201b;
+    memcpy(sp_recomp_access(color,4,1),&initial,4);
+    context->x[0]=command_key; context->x[1]=color; nvn_commands_dispatch(context,"nvnCommandBufferBindColorState");
+    memcpy(sp_recomp_access(color,4,1),&modified,4);
+    uint32_t snapshot=0; memcpy(&snapshot,command->records[0].state,4);
+    if (snapshot==initial && command->record_count==1) flags|=32;
+    context->x[0]=command_key; nvn_commands_dispatch(context,"nvnCommandBufferGetCommandMemoryUsed");
+    if (context->x[0]==sizeof(GuestNvnRecord)) flags|=64;
+    context->x[0]=command_key; nvn_commands_dispatch(context,"nvnCommandBufferEndRecording");
+    if (context->x[0] && active->nvn_lists[0].handle==context->x[0] && active->nvn_lists[0].count==1 && command->control_used==32) flags|=128;
+    memset(command->records,0,sizeof command->records);
+    memcpy(&snapshot,active->nvn_lists[0].records[0].state,4);
+    if (snapshot==initial && !command->recording) flags|=256;
+    context->x[0]=builder; nvn_storage_dispatch(context,"nvnMemoryPoolBuilderSetDefaults");
+    context->x[0]=builder; nvn_storage_dispatch(context,"nvnBufferBuilderSetDefaults");
+    if (nvn_storage(builder,NVN_BUFFER_BUILDER,0)->kind==NVN_BUFFER_BUILDER) flags|=512;
+    uint32_t items[]={0xd34ac082,UINT32_MAX,0,0x80000000,7,7,1,0x83c57b61};
+    const uint32_t sorted[]={0xd34ac082,0,1,7,7,0x80000000,UINT32_MAX,0x83c57b61};
+    uint64_t data=heap_allocate(sizeof items,16); memcpy(sp_recomp_access(data,sizeof items,1),items,sizeof items);
+    context->x[0]=data+4; context->x[1]=data+sizeof items-4;
+    algorithm_import(context,"_ZNSt3__16__sortIRNS_6__lessIjjEEPjEEvT0_S5_T_");
+    if (!memcmp(sp_recomp_access(data,sizeof sorted,0),sorted,sizeof sorted)) flags|=1024;
     context->x[0]=flags;
 }
 static void application_probe(Ctx *context) {
@@ -1135,7 +1214,7 @@ int sp_recomp_test(const char *path) {
             SpGuestProgram graphics_program={graphics_functions,1,NULL,0,sp_guest_fingerprint(image)};
             memset(&context,0,sizeof context);
             VERIFY(sp_guest_run(image,&graphics_program,0x7100000044ULL,&context)==SP_OK);
-            for (unsigned bit=0;bit<5;++bit) VERIFY((context.x[0]&(1u<<bit))!=0);
+            for (unsigned bit=0;bit<11;++bit) VERIFY((context.x[0]&(1u<<bit))!=0);
             context.x[9]=1; VERIFY(sp_guest_run(image,&graphics_program,0x7100000044ULL,&context)==SP_UNSUPPORTED);
             const FnEntry application_functions[]={{0x7100000044ULL,application_probe}};
             const DynSym application_symbols[]={{"_ZN2nn2oe10InitializeEv",0,0},{"_ZN2nn2oe8FinalizeEv",0,0},

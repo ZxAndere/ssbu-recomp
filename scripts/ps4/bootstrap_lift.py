@@ -26,7 +26,13 @@ def main():
     parser.add_argument('--initializers', action='store_true', help='Also seed static constructors and nnMain from this image')
     parser.add_argument('--root', action='append', type=lambda text:int(text,0), default=[], help='Additional observed indirect-call target (repeatable)')
     parser.add_argument('--root-symbol', action='append', default=[], help='Additional exported function name, resolved from this image (repeatable)')
+    parser.add_argument('--roots-file',type=Path,help='Own JSON entry_symbol/root_symbols/root_addresses configuration')
     args = parser.parse_args()
+    if args.roots_file:
+        roots=json.loads(args.roots_file.read_text())
+        args.entry_symbol=roots.get('entry_symbol',args.entry_symbol)
+        args.root_symbol+=roots.get('root_symbols',[])
+        args.root += [int(value,0) if isinstance(value,str) else int(value) for value in roots.get('root_addresses',[])]
     out, allowed = args.out.resolve(), (ROOT/'build_ps4').resolve()
     if out == allowed or not out.is_relative_to(allowed) or out.exists():
         parser.error('--out must be a new dedicated child of build_ps4/')
