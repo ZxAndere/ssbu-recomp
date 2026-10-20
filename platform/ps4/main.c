@@ -2,9 +2,11 @@
 #include <orbis/libkernel.h>
 
 int sp_diagnostic(const char *fixture);
+int sp_services_test(const char *fixture, const char *scratch);
 int main(void) {
     if (sp_init("/data/ssbu-ps4-diagnostic.log")) sp_init(NULL);
     int result = sp_diagnostic("/app0/fixture.txt");
+    result |= sp_services_test("/app0/fixture.txt", NULL);
     /* These tiny non-destructive probes expose the first game-host blocker.
      * A failure does not prevent the rest of the standalone diagnostic. */
     const uint64_t addresses[] = {0x7100000000ULL, 0x7300000000ULL};

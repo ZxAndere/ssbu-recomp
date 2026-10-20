@@ -5,6 +5,7 @@
 #include <string.h>
 
 static unsigned checks, failures;
+int sp_services_test(const char *fixture, const char *scratch);
 #define CHECK(test) do { ++checks; if (!(test)) { ++failures; \
     sp_log("FAIL line %d: %s", __LINE__, #test); } } while (0)
 
@@ -122,9 +123,10 @@ int sp_diagnostic(const char *fixture) {
 }
 #ifndef SSBU_PS4
 int main(int argc, char **argv) {
-    if (argc != 2) { fprintf(stderr, "usage: diagnostic <fixture>\n"); return 2; }
+    if (argc != 2 && argc != 3) { fprintf(stderr, "usage: diagnostic <fixture> [new scratch file]\n"); return 2; }
     if (sp_init(NULL)) return 2;
     int result = sp_diagnostic(argv[1]);
+    result |= sp_services_test(argv[1], argc > 2 ? argv[2] : NULL);
     sp_shutdown();
     return result;
 }

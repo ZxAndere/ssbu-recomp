@@ -5,6 +5,9 @@
 /* Use scePthread entry points, not musl pthread_* wrappers with a different ABI. */
 struct SpThread { OrbisPthread native; SpThreadFn fn; void *argument; };
 struct SpMutex { OrbisPthreadMutex native; };
+struct SpCond { OrbisPthreadCond native; };
+struct SpModule { int32_t native; };
+struct SpTls { OrbisPthreadKey native; };
 const char *sp_platform_name(void) { return "PS4 OpenOrbis x86-64 (experimental)"; }
 size_t sp_page_size(void) { return 0x4000; }
 uint64_t sp_now_us(void) { return sceKernelGetProcessTime(); }
@@ -81,4 +84,72 @@ int sp_mutex_destroy(SpMutex **mutex) {
     if (!mutex || !*mutex) return SP_INVALID;
     if (scePthreadMutexDestroy(&(*mutex)->native)) return SP_SYSTEM;
     free(*mutex); *mutex = NULL; return SP_OK;
+}
+int sp_cond_create(SpCond **out) {
+    if (!out || *out) return SP_INVALID;
+    SpCond *cond = calloc(1, sizeof *cond);
+    if (!cond) return SP_SYSTEM;
+    if (scePthreadCondInit(&cond->native, NULL, "ssbu-cv")) { free(cond); return SP_SYSTEM; }
+    *out = cond; return SP_OK;
+}
+int sp_cond_wait(SpCond *cond, SpMutex *mutex, uint64_t timeout) {
+    if (!cond || !mutex) return SP_INVALID;
+    if (!timeout) return SP_TIMEOUT;
+    int rc = timeout == UINT64_MAX ? scePthreadCondWait(&cond->native, &mutex->native) :
+        scePthreadCondTimedwait(&cond->native, &mutex->native,
+                               timeout > UINT32_MAX ? UINT32_MAX : (uint32_t)timeout);
+    if (!rc) return SP_OK;
+    return (uint32_t)rc == ORBIS_KERNEL_ERROR_ETIMEDOUT || rc == 60 ? SP_TIMEOUT : SP_SYSTEM;
+}
+int sp_cond_signal(SpCond *cond, int broadcast) {
+    if (!cond) return SP_INVALID;
+    return (broadcast ? scePthreadCondBroadcast(&cond->native) : scePthreadCondSignal(&cond->native)) ? SP_SYSTEM : SP_OK;
+}
+int sp_cond_destroy(SpCond **cond) {
+    if (!cond || !*cond) return SP_INVALID;
+    if (scePthreadCondDestroy(&(*cond)->native)) return SP_SYSTEM;
+    free(*cond); *cond = NULL; return SP_OK;
+}
+int sp_tls_create(SpTls **out) {
+    if (!out || *out) return SP_INVALID;
+    SpTls *key = calloc(1, sizeof *key);
+    if (!key) return SP_SYSTEM;
+    if (scePthreadKeyCreate(&key->native, NULL)) { free(key); return SP_SYSTEM; }
+    *out = key; return SP_OK;
+}
+int sp_tls_set(SpTls *key, void *value) {
+    if (!key) return SP_INVALID;
+    return scePthreadSetspecific(key->native, value) ? SP_SYSTEM : SP_OK;
+}
+void *sp_tls_get(SpTls *key) { return key ? scePthreadGetspecific(key->native) : NULL; }
+int sp_tls_destroy(SpTls **key) {
+    if (!key || !*key) return SP_INVALID;
+    if (scePthreadKeyDelete((*key)->native)) return SP_SYSTEM;
+    free(*key); *key = NULL; return SP_OK;
+}
+int sp_module_open(SpModule **out, const char *path) {
+    if (!out || *out || !path || path[0] != '/') return SP_INVALID;
+    SpModule *module = calloc(1, sizeof *module);
+    if (!module) return SP_SYSTEM;
+    int result = 0;
+    module->native = (int32_t)sceKernelLoadStartModule(path, 0, NULL, 0, NULL, &result);
+    if (module->native < 0 || result < 0) { free(module); return SP_SYSTEM; }
+    *out = module; return SP_OK;
+}
+int sp_module_symbol(SpModule *module, const char *name, void **symbol) {
+    if (!module || !name || !symbol) return SP_INVALID;
+    *symbol = NULL;
+    return sceKernelDlsym(module->native, name, symbol) ? SP_SYSTEM : SP_OK;
+}
+int sp_module_close(SpModule **module) {
+    if (!module || !*module) return SP_INVALID;
+    int result = 0;
+    if (sceKernelStopUnloadModule((*module)->native, 0, NULL, 0, NULL, &result) < 0 || result < 0)
+        return SP_SYSTEM;
+    free(*module); *module = NULL; return SP_OK;
+}
+int sp_memory_protect(SpMemory *memory, unsigned access) {
+    if (!memory || !memory->data || !memory->size || access & ~(SP_READ | SP_WRITE) ||
+        access == SP_WRITE) return SP_INVALID;
+    return sceKernelMprotect(memory->data, memory->size, (int)access) ? SP_SYSTEM : SP_OK;
 }
