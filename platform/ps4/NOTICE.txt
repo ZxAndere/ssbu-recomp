@@ -1,4 +1,4 @@
-SSBU Platform Diagnostic - experimental homebrew, no game content.
+SSBU Runtime Bootstrap - experimental homebrew. Public build has no game content.
 
 This project's sources are under the GNU GPL version 3 (see licenses/project.txt).
 Source and build scripts: https://github.com/ZxAndere/ssbu-recomp
@@ -15,4 +15,7 @@ https://github.com/OpenOrbis/musl
 
 Toolchain/host utilities remain outside the package. No Nintendo assets,
 generated game code, firmware files, DLC, encryption keys or save data are
-included. This application does not launch or emulate Smash Ultimate.
+included in the public build. The synthetic ARM64 test and its translated C are
+original test programs, not Smash code. The bootstrap can inspect a local game
+main.elf and use a matching statically linked function table when one is built
+privately. The public build cannot execute Smash Ultimate gameplay.

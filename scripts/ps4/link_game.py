@@ -7,6 +7,7 @@ from pathlib import Path
 import shutil
 import struct
 import re
+import json
 
 
 def image_fingerprint(path):
@@ -21,6 +22,18 @@ def stage(generated,image,build,entry=0):
     generated,image=Path(generated).resolve(),Path(image).resolve()
     if not (generated/'table.c').is_file() or not (generated/'imports.c').is_file():
         raise RuntimeError('Expected a complete upstream lift directory with table.c and imports.c')
+    manifest_path=generated/'lift-manifest.json'
+    if not manifest_path.is_file():
+        raise RuntimeError('Missing lift-manifest.json; generate with scripts/ps4/lift.py to bind sources to the input ELF')
+    from lift import sha256
+    manifest=json.loads(manifest_path.read_text(encoding='utf-8'))
+    if manifest.get('version')!=1 or manifest.get('image_sha256')!=sha256(image):
+        raise RuntimeError('Generated code manifest does not match the input image')
+    present={p.name for p in generated.iterdir() if p.suffix in ('.c','.h')}
+    if set(manifest.get('generated_files',{}))!=present:
+        raise RuntimeError('Generated file set changed after lifting')
+    for name,expected in manifest['generated_files'].items():
+        if sha256(generated/name)!=expected: raise RuntimeError('Generated source changed after lifting: '+name)
     with image.open('rb') as source: header=source.read(64)
     if len(header)!=64 or header[:6]!=b'\x7fELF\2\1' or struct.unpack_from('<H',header,18)[0]!=183:
         raise RuntimeError('--game-image must be the original AArch64 main.elf used for this lift')

@@ -3,6 +3,7 @@
 #include "guest.h"
 #include <orbis/libkernel.h>
 #include <math.h>
+#include <string.h>
 
 int sp_diagnostic(const char *fixture);
 int sp_services_test(const char *fixture, const char *scratch);
@@ -37,6 +38,7 @@ int main(void) {
     SpUiState state = {"PLATFORM AND RECOMPILER BOOTSTRAP", game_result==SP_IO ? "GAME MAIN.ELF MISSING IN /DATA/SSBU" :
         game_result==SP_OK ? "GUEST ENTRY RETURNED - SEE LOG" : "GAME BOOT STOPPED - SEE LOG", {0},0,result,audio_result,0};
     uint64_t previous = 0;
+    SpUiState cached[2] = {0}; unsigned draws=0;
     for (unsigned frame = 0; video; ++frame) {
         nnpad_poll(0); state.pad_present = nnpad_get(0,&state.pad); state.frame = frame;
         uint64_t pressed = state.pad.buttons & ~previous; previous = state.pad.buttons;
@@ -51,14 +53,19 @@ int main(void) {
         if (pressed & (1ULL<<10)) break;
         unsigned width,height,pitch;
         uint32_t *pixels = sp_video_pixels(video,&width,&height,&pitch);
-        sp_ui_draw(pixels,width,height,pitch,&state);
+        SpUiState *last=&cached[frame&1];
+        if (frame<2 || memcmp(&last->pad,&state.pad,sizeof state.pad) || last->pad_present!=state.pad_present ||
+            last->audio_result!=state.audio_result || last->core_result!=state.core_result) {
+            sp_ui_draw(pixels,width,height,pitch,&state); *last=state; ++draws;
+        }
         int rc = sp_video_present(video);
         if (rc) { sp_log("Video present failed: %d",rc); break; }
         if (!(frame % 600)) {
             uint64_t under=0,over=0; size_t queued=0; int error=0;
             sp_audio_stats(audio,&under,&over,&queued,&error);
-            sp_log("Device status: frame=%u pad=%d audio-error=%08x queued=%llu silent=%llu rejected=%llu",
-                   frame,state.pad_present,(unsigned)error,(unsigned long long)queued,
+            state.audio_result=error ? SP_SYSTEM : audio_result;
+            sp_log("Device status: frame=%u redraws=%u pad=%d audio-error=%08x queued=%llu silent=%llu rejected=%llu",
+                   frame,draws,state.pad_present,(unsigned)error,(unsigned long long)queued,
                    (unsigned long long)under,(unsigned long long)over);
         }
         sp_sleep_ms(16);

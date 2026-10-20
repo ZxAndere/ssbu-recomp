@@ -139,7 +139,7 @@ int sp_module_open(SpModule **out, const char *path) {
 int sp_module_symbol(SpModule *module, const char *name, void **symbol) {
     if (!module || !name || !symbol) return SP_INVALID;
     *symbol = NULL;
-    return sceKernelDlsym(module->native, name, symbol) ? SP_SYSTEM : SP_OK;
+    return sceKernelDlsym(module->native, name, symbol) || !*symbol ? SP_SYSTEM : SP_OK;
 }
 int sp_module_close(SpModule **module) {
     if (!module || !*module) return SP_INVALID;

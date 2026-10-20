@@ -121,11 +121,11 @@ def package(sdk, build, eboot, game_image=None):
     sfo = stage / "sce_sys/param.sfo"
     run([tool, "sfo_new", sfo], env=env)
     values = {
-        "APP_TYPE": ("Integer", 4, "1"), "APP_VER": ("Utf8", 8, "1.00"),
+        "APP_TYPE": ("Integer", 4, "1"), "APP_VER": ("Utf8", 8, "1.01"),
         "ATTRIBUTE": ("Integer", 4, "0"), "CATEGORY": ("Utf8", 4, "gd"),
         "CONTENT_ID": ("Utf8", 48, CONTENT_ID), "DOWNLOAD_DATA_SIZE": ("Integer", 4, "0"),
-        "SYSTEM_VER": ("Integer", 4, "0"), "TITLE": ("Utf8", 128, "SSBU Platform Diagnostic"),
-        "TITLE_ID": ("Utf8", 12, TITLE_ID), "VERSION": ("Utf8", 8, "1.00"),
+        "SYSTEM_VER": ("Integer", 4, "0"), "TITLE": ("Utf8", 128, "SSBU Runtime Bootstrap"),
+        "TITLE_ID": ("Utf8", 12, TITLE_ID), "VERSION": ("Utf8", 8, "1.01"),
     }
     for key, (kind, length, value) in values.items():
         run([tool, "sfo_setentry", sfo, key, "--type", kind,
