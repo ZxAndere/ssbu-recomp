@@ -3,7 +3,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "virtual_memory.c"
 typedef struct { SpMemory memory; uint64_t address; size_t requested; } Allocation;
+typedef struct { GuestVm *vm; uint64_t address; } GuestRegion;
 typedef struct { SpMutex *native; uint64_t address; unsigned depth; int recursive; } GuestMutex;
 typedef struct { uint64_t function,argument,dso; } GuestDestructor;
 typedef struct {
@@ -19,6 +21,7 @@ typedef struct {
     Bootstrap *bootstrap;
     GuestDestructor destructors[512]; size_t destructor_count;
     SpTls *tls_slots[64]; uint64_t tls_destructors[64];
+    GuestRegion regions[16]; uint64_t next_region;
 } Execution;
 static Execution *active;
 uint64_t sp_recomp_budget;
@@ -50,6 +53,12 @@ void *sp_recomp_access(uint64_t address,size_t size,int write) {
             size<=allocation->requested-(address-allocation->address)) {
             pointer=(char *)allocation->memory.data+(address-allocation->address); break;
         }
+    }
+    if (!pointer) for (size_t i=0;i<16;++i) {
+        GuestRegion *region=&active->regions[i];
+        if (region->vm && address>=region->address && address-region->address<=region->vm->requested)
+            pointer=vm_pointer(region->vm,(size_t)(address-region->address),size,write);
+        if (pointer) break;
     }
     if (!pointer) fail(SP_ADDRESS,write ? "invalid guest write" : "invalid guest read",address);
     return pointer;
@@ -130,6 +139,14 @@ static GuestMutex *guest_mutex(uint64_t address,int create,int recursive) {
     if (sp_mutex_create(&empty->native)) fail(SP_SYSTEM,"native mutex creation failed",address);
     memset(object,0,0x20); empty->address=address; empty->recursive=recursive; empty->depth=0;
     return empty;
+}
+static GuestRegion *guest_region(uint64_t address,size_t size) {
+    for (size_t i=0;i<16;++i) {
+        GuestRegion *region=&active->regions[i];
+        if (region->vm && address>=region->address && address-region->address<=region->vm->requested &&
+            size<=region->vm->requested-(address-region->address)) return region;
+    }
+    fail(SP_ADDRESS,"unknown virtual memory range",address); return NULL;
 }
 static void import_named(Ctx *context,const char *name);
 void host_import(Ctx *context,int index) {
@@ -214,6 +231,38 @@ static void import_named(Ctx *context,const char *name) {
         uint64_t time=sp_now_us(); context->x[0]=(time/10)*192+(time%10)*192/10;
     } else if (!strcmp(name,"_ZN2nn2os22GetSystemTickFrequencyEv")) {
         context->x[0]=19200000;
+    } else if (!strcmp(name,"_ZN2nn2os21AllocateAddressRegionEPmm")) {
+        size_t index=0; while (index<16 && active->regions[index].vm) ++index;
+        if (index==16) fail(SP_SYSTEM,"virtual region slots exhausted",context->x[1]);
+        size_t size=(size_t)context->x[1];
+        if (size>UINT64_C(4)*1024*1024*1024 || active->next_region>0x8900000000ULL-size)
+            fail(SP_SYSTEM,"virtual reservation budget exceeded",size);
+        GuestRegion *region=&active->regions[index];
+        if (vm_reserve(&region->vm,size)) fail(SP_SYSTEM,"native virtual reservation failed",size);
+        region->address=active->next_region; active->next_region+=(size+0x1fffff)&~UINT64_C(0x1fffff);
+        memcpy(sp_recomp_access(context->x[0],8,1),&region->address,8); context->x[0]=0;
+    } else if (!strcmp(name,"_ZN2nn2os19AllocateMemoryPagesEmm") || !strcmp(name,"_ZN2nn2os15FreeMemoryPagesEmm") ||
+               !strcmp(name,"_ZN2nn2os19SetMemoryPermissionEmmi")) {
+        uint64_t address=context->x[0]; size_t size=(size_t)context->x[1];
+        GuestRegion *region=guest_region(address,size); size_t offset=(size_t)(address-region->address);
+        int rc;
+        if (!strcmp(name,"_ZN2nn2os19AllocateMemoryPagesEmm")) {
+            size_t committed=0,extra=0,page=vm_host_page();
+            for (size_t i=0;i<16;++i) if (active->regions[i].vm) committed+=active->regions[i].vm->committed_bytes;
+            if (!vm_pages(region->vm,offset,size)) fail(SP_INVALID,"unaligned guest commit",address);
+            for (size_t at=offset/page*page;at<(offset+size+page-1)/page*page;at+=page)
+                if (!region->vm->host_present[at/page]) extra+=page;
+            if (extra>512*1024*1024-committed) fail(SP_SYSTEM,"physical guest page budget exceeded",extra);
+            rc=vm_commit(region->vm,offset,size);
+        } else if (!strcmp(name,"_ZN2nn2os15FreeMemoryPagesEmm")) rc=vm_decommit(region->vm,offset,size);
+        else rc=vm_permission(region->vm,offset,size,(unsigned)context->x[2]);
+        if (rc) fail(rc,"virtual page operation failed",address);
+        context->x[0]=0;
+    } else if (!strcmp(name,"_ZN2nn2os17FreeAddressRegionEm")) {
+        GuestRegion *region=guest_region(context->x[0],0);
+        if (context->x[0]!=region->address) fail(SP_INVALID,"free of interior virtual address",context->x[0]);
+        if (vm_close(&region->vm)) fail(SP_SYSTEM,"virtual reservation release failed",context->x[0]);
+        context->x[0]=0;
     } else if (!strcmp(name,"_ZN2nn2os18SdkAllocateTlsSlotEPNS0_7TlsSlotEPFvmE") ||
                !strcmp(name,"_ZN2nn2os15AllocateTlsSlotEPNS0_7TlsSlotEPFvmE")) {
         uint32_t slot=0;
@@ -293,9 +342,15 @@ static int execute(SpGuestImage *image,const SpGuestProgram *program,uint64_t en
         program->image_fingerprint!=sp_guest_fingerprint(image)) return SP_INVALID;
     for (size_t i=0;i<program->function_count;++i)
         if (!program->functions[i].fn || (i && program->functions[i-1].addr>=program->functions[i].addr)) return SP_INVALID;
+    if (bootstrap && bootstrap->sdk_program) {
+        const SpGuestProgram *sdk=bootstrap->sdk_program;
+        if (!sdk->functions || !sdk->function_count) return SP_INVALID;
+        for (size_t i=0;i<sdk->function_count;++i)
+            if (!sdk->functions[i].fn || (i && sdk->functions[i-1].addr>=sdk->functions[i].addr)) return SP_INVALID;
+    }
     Execution *execution=calloc(1,sizeof *execution);
     if (!execution) return SP_SYSTEM;
-    execution->image=image; execution->program=program; execution->next_address=0x7400000000ULL;
+    execution->image=image; execution->program=program; execution->next_address=0x7400000000ULL; execution->next_region=0x7900000000ULL;
     execution->bootstrap=bootstrap;
     if (sp_memory_map(&execution->stack,1024*1024,NULL)) { free(execution); return SP_SYSTEM; }
     if (sp_memory_map(&execution->tls,64*1024,NULL)) { sp_memory_unmap(&execution->stack); free(execution); return SP_SYSTEM; }
@@ -342,6 +397,7 @@ static int execute(SpGuestImage *image,const SpGuestProgram *program,uint64_t en
         }
     }
     active=NULL; int rc=execution->error;
+    for (size_t i=0;i<16;++i) if (execution->regions[i].vm) vm_close(&execution->regions[i].vm);
     for (size_t i=0;i<64;++i) if (execution->tls_slots[i]) sp_tls_destroy(&execution->tls_slots[i]);
     for (size_t i=0;i<512;++i) if (execution->mutexes[i].native) {
         if (execution->mutexes[i].depth) sp_mutex_unlock(execution->mutexes[i].native);
@@ -356,6 +412,14 @@ int sp_guest_run(SpGuestImage *image,const SpGuestProgram *program,uint64_t entr
 }
 extern const SpGuestProgram sp_smoke_program;
 #ifdef SP_GAME_LINKED
+typedef struct {
+    SpGuestImage *image; const SpGuestProgram *program; uint64_t entry;
+    Ctx *context; int sequence,result; Bootstrap *bootstrap;
+} BootWork;
+static void boot_on_fiber(void *argument) {
+    BootWork *work=argument;
+    work->result=execute(work->image,work->program,work->entry,work->context,work->sequence,work->bootstrap);
+}
 static int bootstrap_resolve(const char *name,uint64_t *address,void *argument) {
     Bootstrap *bootstrap=argument; const SpGuestProgram *program=bootstrap->program;
     /* Bind a symbolic thunk even for unsupported imports. The thunk fails on
@@ -455,6 +519,24 @@ static void services_probe(Ctx *context) {
     if (context->x[20]==12) passed|=64;
     context->x[0]=passed;
 }
+static void virtual_probe(Ctx *context) {
+    uint64_t passed=0,region=0; const uint64_t output=0x7100003180ULL;
+    context->x[0]=output; context->x[1]=65536; host_import(context,0);
+    if (!context->x[0]) passed|=1;
+    memcpy(&region,sp_recomp_access(output,8,0),8);
+    context->x[0]=region+4096; context->x[1]=4096; host_import(context,1);
+    uint32_t value=0x12345678; memcpy(sp_recomp_access(region+4096,4,1),&value,4);
+    if (context->x[9]==2) { sp_recomp_access(region,4,0); return; }
+    context->x[0]=region+4096; context->x[1]=4096; context->x[2]=1; host_import(context,2);
+    if (context->x[9]==1) { sp_recomp_access(region+4096,4,1); return; }
+    uint32_t actual=0; memcpy(&actual,sp_recomp_access(region+4096,4,0),4);
+    if (actual==value) passed|=2;
+    context->x[0]=region+4096; context->x[1]=4096; host_import(context,3);
+    context->x[0]=region+4096; context->x[1]=4096; host_import(context,1);
+    memcpy(&actual,sp_recomp_access(region+4096,4,0),4); if (!actual) passed|=4;
+    context->x[0]=region; host_import(context,4); passed|=8;
+    context->x[0]=passed;
+}
 int sp_recomp_test(const char *path) {
     unsigned checks=0,failures=0;
 #define VERIFY(expr) do { ++checks; if (!(expr)) { ++failures; sp_log("RECOMP FAIL %d: %s",__LINE__,#expr); } } while (0)
@@ -523,6 +605,18 @@ int sp_recomp_test(const char *path) {
             SpGuestProgram service_program={service_functions,2,service_symbols,9,sp_guest_fingerprint(image)};
             memset(&context,0,sizeof context);
             VERIFY(sp_guest_run(image,&service_program,0x7100000044ULL,&context)==SP_OK && context.x[0]==127);
+            const FnEntry virtual_functions[]={{0x7100000044ULL,virtual_probe}};
+            const DynSym virtual_symbols[]={
+                {"_ZN2nn2os21AllocateAddressRegionEPmm",0,0},{"_ZN2nn2os19AllocateMemoryPagesEmm",0,0},
+                {"_ZN2nn2os19SetMemoryPermissionEmmi",0,0},{"_ZN2nn2os15FreeMemoryPagesEmm",0,0},
+                {"_ZN2nn2os17FreeAddressRegionEm",0,0}};
+            SpGuestProgram virtual_program={virtual_functions,1,virtual_symbols,5,sp_guest_fingerprint(image)};
+            memset(&context,0,sizeof context);
+            VERIFY(sp_guest_run(image,&virtual_program,0x7100000044ULL,&context)==SP_OK && context.x[0]==15);
+            context.x[9]=1;
+            VERIFY(sp_guest_run(image,&virtual_program,0x7100000044ULL,&context)==SP_ADDRESS);
+            context.x[9]=2;
+            VERIFY(sp_guest_run(image,&virtual_program,0x7100000044ULL,&context)==SP_ADDRESS);
         }
         VERIFY(sp_guest_close(&image)==SP_OK);
     }
@@ -570,7 +664,19 @@ int sp_game_bootstrap(const char *path) {
         if (program->symbols[i].defined && !strcmp(program->symbols[i].name,"nninitStartup")) {
             entry=0x7100000000ULL+program->symbols[i].value; sequence=1; break;
         }
-    if (!rc) rc=execute(image,program,entry ? entry : sp_guest_entry(image),&context,sequence,&bootstrap);
+    if (!rc) {
+        /* Translated native calls have their own bounded stack; the ARM SP
+         * remains in the independent 1 MiB translated guest allocation. */
+        BootWork work={image,program,entry ? entry : sp_guest_entry(image),&context,sequence,SP_SYSTEM,&bootstrap};
+        SpFiber *fiber=NULL;
+        rc=sp_fiber_create(&fiber,16*1024*1024,boot_on_fiber,&work);
+        if (!rc) rc=sp_fiber_resume(fiber);
+        if (!rc) rc=sp_fiber_finished(fiber) ? work.result : SP_INVALID;
+        if (fiber) {
+            int close_rc=sp_fiber_destroy(&fiber); if (!rc) rc=close_rc;
+        }
+        int shutdown_rc=sp_fiber_thread_shutdown(); if (!rc) rc=shutdown_rc;
+    }
     sp_log("GAME BOOT: execution status=%d unresolved=%llu x0=%llu stop=%s",rc,(unsigned long long)missing,
            (unsigned long long)context.x[0],sp_guest_last_error());
     if (bootstrap.sdk) sp_guest_close(&bootstrap.sdk);
